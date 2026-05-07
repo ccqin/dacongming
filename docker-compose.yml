@@ -9,7 +9,7 @@ services:
     ports:
       - "5001:5001"
     environment:
-      - TMDB_API_KEY=${TMDB_API_KEY:-167dbf9fe641d7afb0be3d354752f82a}
+      - TMDB_API_KEY=${TMDB_API_KEY} # Do NOT set default value here to avoid leaking keys in git!
     volumes:
       - tmdb_data:/app/data
     restart: unless-stopped

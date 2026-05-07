@@ -6,7 +6,7 @@ var builder = WebApplication.CreateBuilder(args);
 // 配置
 var tmdbApiKey = builder.Configuration["Tmdb:ApiKey"]
     ?? Environment.GetEnvironmentVariable("TMDB_API_KEY")
-    ?? "167dbf9fe641d7afb0be3d354752f82a";
+    ?? throw new InvalidOperationException("Environment variable 'TMDB_API_KEY' is missing. Please set it in docker-compose or environment.");
 var dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "tmdb_cache.db");
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 
