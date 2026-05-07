@@ -1,0 +1,55 @@
+services:
+  tmdbproxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: TmdbProxy
+    container_name: zhuiying-tmdbproxy
+    ports:
+      - "5001:5001"
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY:-167dbf9fe641d7afb0be3d354752f82a}
+    volumes:
+      - tmdb_data:/app/data
+    restart: unless-stopped
+    networks:
+      - zhuiying-net
+
+  mainsite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: MainSite
+    container_name: zhuiying-mainsite
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5000
+    restart: unless-stopped
+    networks:
+      - zhuiying-net
+
+  tgbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: TgBot
+    container_name: zhuiying-tgbot
+    environment:
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN:-YOUR_TOKEN}
+      - MAIN_SITE_URL=http://mainsite:5000
+    restart: unless-stopped
+    depends_on:
+      - mainsite
+    networks:
+      - zhuiying-net
+
+volumes:
+  tmdb_data:
+
+networks:
+  zhuiying-net:
+    driver: bridge
