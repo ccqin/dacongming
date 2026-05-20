@@ -1,0 +1,6 @@
+@Zhuiying.MainSite_HostAddress = http://localhost:5217
+
+GET {{Zhuiying.MainSite_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

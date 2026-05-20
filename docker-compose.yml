@@ -1,0 +1,81 @@
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: zhuiying-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+    depends_on:
+      - zhuiyinghub
+    networks:
+      - zhuiying-net
+
+  zhuiyinghub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: Hub
+    container_name: zhuiying-hub
+    ports:
+      - "5002:5002"
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - ASPNETCORE_URLS=http://0.0.0.0:5002
+    volumes:
+      - tmdb_data:/app/data
+    restart: unless-stopped
+    networks:
+      - zhuiying-net
+
+  pansou:
+    image: ghcr.io/fish2018/pansou:latest
+    container_name: zhuiying-pansou
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - pansou_data:/app/config
+    restart: unless-stopped
+    networks:
+      - zhuiying-net
+
+  mainsite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: MainSite
+    container_name: zhuiying-mainsite
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5000
+    restart: unless-stopped
+    networks:
+      - zhuiying-net
+
+  tgbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: TgBot
+    container_name: zhuiying-tgbot
+    environment:
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN:-YOUR_TOKEN}
+      - MAIN_SITE_URL=http://mainsite:5000
+    restart: unless-stopped
+    depends_on:
+      - mainsite
+    networks:
+      - zhuiying-net
+
+volumes:
+  tmdb_data:
+  pansou_data:
+
+networks:
+  zhuiying-net:
+    driver: bridge
