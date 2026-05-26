@@ -10,8 +10,11 @@
         body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
         header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 5%; background: rgba(15,23,42,0.95); position: sticky; top: 0; z-index: 100; border-bottom: 1px solid #334155; }
         .logo { font-size: 1.5rem; font-weight: 800; color: var(--accent); letter-spacing: 1px; }
-        .nav-btn { background: var(--card); color: var(--text); border: 1px solid #475569; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+        .nav-btn { background: var(--card); color: var(--text); border: 1px solid #475569; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.9rem; position: relative; }
         .nav-btn:hover { background: #334155; }
+        .dropdown { display: none; position: absolute; top: 110%; right: 0; background: var(--card); border: 1px solid #475569; border-radius: 8px; min-width: 120px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 101; }
+        .dropdown a { display: block; padding: 0.5rem 1rem; color: var(--text); text-decoration: none; cursor: pointer; }
+        .dropdown a:hover { background: #334155; }
         
         main { padding: 2rem 0; }
         .hero { width: 90%; margin: 0 auto 2rem; border-radius: 16px; overflow: hidden; position: relative; height: 40vh; min-height: 250px; }
@@ -42,7 +45,13 @@
 <body>
     <header>
         <div class="logo">追影</div>
-        <button id="auth-btn" class="nav-btn" onclick="openLogin()">登录</button>
+        <div id="user-area">
+            <button id="auth-btn" class="nav-btn">登录</button>
+            <div id="user-menu" class="dropdown">
+                <a onclick="toggleAdminModal()">管理后台</a>
+                <a onclick="logout()">退出登录</a>
+            </div>
+        </div>
     </header>
 
     <main>
@@ -72,11 +81,28 @@
         const API = '';
         let token = localStorage.getItem('token');
         
+        let currentUser = null;
         async function init() {
-            const user = await checkAuth();
-            document.getElementById('auth-btn').textContent = user ? user : '登录';
+            currentUser = await checkAuth();
+            const btn = document.getElementById('auth-btn');
+            const menu = document.getElementById('user-menu');
+            
+            btn.textContent = currentUser ? currentUser : '登录';
+            if (currentUser) {
+                btn.onclick = () => menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+            } else {
+                btn.onclick = () => openLogin();
+            }
             loadCategories();
         }
+
+        // 关闭下拉菜单的全局点击监听
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('user-menu');
+            if (!e.target.closest('#user-area')) {
+                menu.style.display = 'none';
+            }
+        });
 
         async function checkAuth() {
             if (!token) return null;
@@ -160,7 +186,38 @@
                 }
             } catch { msg.textContent = '网络错误'; }
         }
-        
+
+        function logout() {
+            localStorage.removeItem('token');
+            location.reload();
+        }
+
+        function toggleAdminModal() {
+            document.getElementById('user-menu').style.display = 'none';
+            const adminModal = document.getElementById('admin-modal') || document.createElement('div');
+            // 简单实现：弹出一个提示，或者你可以扩展成真正的管理面板
+            if (!document.getElementById('admin-modal')) {
+                adminModal.id = 'admin-modal';
+                adminModal.innerHTML = `
+                    <div class="modal" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
+                        <h2>管理后台</h2>
+                        <div id="admin-stats" style="margin: 1rem 0; text-align: left;">加载中...</div>
+                        <button onclick="document.getElementById('admin-modal').style.display='none'">关闭</button>
+                    </div>`;
+                document.body.appendChild(adminModal);
+                adminModal.style.cssText = 'display: flex; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; justify-content: center; align-items: center;';
+                
+                fetch(`${API}/api/admin/stats`, { headers: { 'Authorization': `Bearer ${token}` }})
+                    .then(res => res.json()).then(data => {
+                        document.getElementById('admin-stats').innerHTML = `
+                            <p>总用户数: ${data.totalUsers ?? '未知'}</p>
+                            <p>待审核: ${data.pendingUsers ?? '未知'}</p>
+                        `;
+                    }).catch(() => document.getElementById('admin-stats').textContent = '加载失败');
+            }
+            adminModal.style.display = 'flex';
+        }
+
         init();
     </script>
 </body>
