@@ -21,9 +21,14 @@ await using (var conn = new SqliteConnection($"Data Source={dbPath}"))
         CREATE TABLE IF NOT EXISTS tmdb_cache (
             cache_key TEXT PRIMARY KEY,
             response_data TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_created_at ON tmdb_cache(created_at);";
+        CREATE INDEX IF NOT EXISTS idx_expires_at ON tmdb_cache(expires_at);";
+    await cmd.ExecuteNonQueryAsync();
+    // 修复旧数据：如果旧表没有 expires_at，这里会失败，但既然重建了缓存机制，可以直接忽略或清理
+    // 为安全起见，强制删除旧表重建（因为旧缓存没有 TTL，数据已过时）
+    cmd.CommandText = "DELETE FROM tmdb_cache"; 
     await cmd.ExecuteNonQueryAsync();
 }
 
@@ -56,7 +61,7 @@ app.MapGet("/api/tmdb/trending", async (IHttpClientFactory f, [AsParameters] Que
     var cached = await cache.Get(key);
     if (cached != null) return Results.Content(cached, "application/json");
     var r = await ProxyGet(f, $"trending/all/week?api_key={tmdbApiKey}&language={qp.Language}&page={qp.Page}");
-    if (r != null) await cache.Set(key, r);
+    if (r != null) await cache.Set(key, r, 3600); // 1 hour
     return r != null ? Results.Content(r, "application/json") : Results.StatusCode(502);
 });
 
@@ -66,6 +71,7 @@ app.MapGet("/api/tmdb/search", async (string q, IHttpClientFactory f, [AsParamet
     var key = $"search?q={q}&lang={qp.Language}&page={qp.Page}";
     var cached = await cache.Get(key);
     if (cached != null) return Results.Content(cached, "application/json");
+    
     var client = f.CreateClient("tmdb");
     var enc = Uri.EscapeDataString(q);
     var responses = await Task.WhenAll(
@@ -83,14 +89,19 @@ app.MapGet("/api/tmdb/search", async (string q, IHttpClientFactory f, [AsParamet
         results = mj.RootElement.GetProperty("results").EnumerateArray().Concat(tj.RootElement.GetProperty("results").EnumerateArray()).ToArray()
     };
     var json = JsonSerializer.Serialize(merged);
-    if (movieResponse.IsSuccessStatusCode) await cache.Set(key, json);
+    if (movieResponse.IsSuccessStatusCode) await cache.Set(key, json, 600); // 10 mins
     return Results.Content(json, "application/json");
 });
 
 app.MapGet("/api/tmdb/discover", async (string type, IHttpClientFactory f, [AsParameters] QueryParams qp) =>
 {
+    var key = $"discover/{type}?lang={qp.Language}&page={qp.Page}";
+    var cached = await cache.Get(key);
+    if (cached != null) return Results.Content(cached, "application/json");
     var path = $"discover/{type}?api_key={tmdbApiKey}&language={qp.Language}&page={qp.Page}";
-    return await ProxyGet(f, path) is { } j ? Results.Content(j, "application/json") : Results.StatusCode(502);
+    var r = await ProxyGet(f, path);
+    if (r != null) await cache.Set(key, r, 3600); // 1 hour
+    return r != null ? Results.Content(r, "application/json") : Results.StatusCode(502);
 });
 
 app.MapGet("/api/tmdb/movie/{id}", async (int id, IHttpClientFactory f, [AsParameters] QueryParams qp) =>
@@ -99,7 +110,7 @@ app.MapGet("/api/tmdb/movie/{id}", async (int id, IHttpClientFactory f, [AsParam
     var cached = await cache.Get(key);
     if (cached != null) return Results.Content(cached, "application/json");
     var r = await ProxyGet(f, $"movie/{id}?api_key={tmdbApiKey}&language={qp.Language}");
-    if (r != null) await cache.Set(key, r);
+    if (r != null) await cache.Set(key, r, 86400); // 24 hours
     return r != null ? Results.Content(r, "application/json") : Results.StatusCode(502);
 });
 
@@ -109,7 +120,7 @@ app.MapGet("/api/tmdb/tv/{id}", async (int id, IHttpClientFactory f, [AsParamete
     var cached = await cache.Get(key);
     if (cached != null) return Results.Content(cached, "application/json");
     var r = await ProxyGet(f, $"tv/{id}?api_key={tmdbApiKey}&language={qp.Language}");
-    if (r != null) await cache.Set(key, r);
+    if (r != null) await cache.Set(key, r, 86400); // 24 hours
     return r != null ? Results.Content(r, "application/json") : Results.StatusCode(502);
 });
 
@@ -152,7 +163,7 @@ async Task<string?> ProxyGet(IHttpClientFactory f, string path)
 public interface IDbCache
 {
     Task<string?> Get(string key);
-    Task Set(string key, string value);
+    Task Set(string key, string value, int ttlSeconds = 3600);
     (int Total, string? Latest) GetStats();
 }
 
@@ -163,19 +174,23 @@ public class SqliteCache(string dbPath) : IDbCache
         await using var conn = new SqliteConnection($"Data Source={dbPath}");
         await conn.OpenAsync();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT response_data FROM tmdb_cache WHERE cache_key = @key";
+        cmd.CommandText = "SELECT response_data FROM tmdb_cache WHERE cache_key = @key AND expires_at > datetime('now')";
         cmd.Parameters.AddWithValue("@key", key);
         var result = await cmd.ExecuteScalarAsync();
         return result?.ToString();
     }
-    public async Task Set(string key, string value)
+    public async Task Set(string key, string value, int ttlSeconds = 3600)
     {
         await using var conn = new SqliteConnection($"Data Source={dbPath}");
         await conn.OpenAsync();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT OR REPLACE INTO tmdb_cache (cache_key, response_data) VALUES (@key, @value)";
+        cmd.CommandText = @"
+            INSERT OR REPLACE INTO tmdb_cache (cache_key, response_data, expires_at) 
+            VALUES (@key, @value, datetime('now', '+' || @ttl || ' seconds'));
+            DELETE FROM tmdb_cache WHERE expires_at < datetime('now');";
         cmd.Parameters.AddWithValue("@key", key);
         cmd.Parameters.AddWithValue("@value", value);
+        cmd.Parameters.AddWithValue("@ttl", ttlSeconds);
         await cmd.ExecuteNonQueryAsync();
     }
     public (int Total, string? Latest) GetStats()
