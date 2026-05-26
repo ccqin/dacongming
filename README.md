@@ -9,16 +9,23 @@
 
 | 服务 | 目录 | 端口 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **MainSite** | `src/Zhuiying.MainSite` | 5000 | 主站 API，聚合数据、管理用户、接收 TG 推送 |
-| **TmdbProxy** | `src/Zhuiying.TmdbProxy` | 5001 | TMDB API 反代，内置 SQLite 缓存，降低 API 配额消耗 |
-| **TgBot** | `src/Zhuiying.TgBot` | - | Telegram 机器人后台，实时处理用户指令并推送主站 |
+| **Nginx** | `nginx/` | **8980** | 统一网关，按域名分发流量 |
+| **MainSite** | `src/Zhuiying.MainSite` | 5000 | 主站 API + 前端 SPA，聚合数据、管理用户 |
+| **Unified Hub** | `src/Zhuiying.Hub` | 5002 | 统一数据 Hub (TMDB + PanSou)，合并旧服务 |
+| **TgBot** | `src/Zhuiying.TgBot` | - | Telegram 机器人后台 |
 | **Shared** | `src/Zhuiying.Shared` | - | 公共模型 (DTOs) |
+
+## 访问入口
+> **主站 URL**: `http://zhuiying.19856789.xyz:8980`
+>
+> **Hub URL**: `http://zhuiyinghub.19856789.xyz:8980` (内网/调试用)
+>
+> *注：防火墙已开放 8980 端口。*
 
 ## 技术栈
 - **.NET 10** (C# 14)
 - **ASP.NET Core** (Minimal APIs, Background Services)
-- **SQLite** (数据缓存)
-- **Telegram.Bot** SDK
+- **SQLite** (数据缓存/用户系统)
 - **Docker & Docker Compose**
 
 ## 快速开始
@@ -30,42 +37,25 @@ cd dacongming
 ```
 
 ### 2. 配置环境变量
-在根目录下创建 `.env` 文件（可选，用于自定义配置）：
+在根目录下创建 `.env` 文件：
 ```env
 # TMDB API Key (必填)
 TMDB_API_KEY=your_tmdb_api_key
 
-# Telegram Bot Token (可选，如需启动 TG Bot)
+# Telegram Bot Token (可选)
 TG_BOT_TOKEN=your_telegram_bot_token
-
-# 主站 URL (供 Bot 使用)
-MAIN_SITE_URL=http://mainsite:5000
 ```
 
 ### 3. Docker Compose 启动
 ```bash
 docker-compose up -d --build
 ```
-服务启动后，可通过以下地址访问：
-- **主站 API**: `http://localhost:5000`
-- **TMDB 反代**: `http://localhost:5001`
+服务启动后，访问 `http://服务器IP:8980` 即可看到主站。
 
-## 目录结构
-```text
-dacongming/
-├── docker-compose.yml       # 统一编排文件
-├── Dockerfile               # 通用构建文件 (通过 TARGET 参数区分服务)
-├── src/
-│   ├── Zhuiying.TmdbProxy/  # TMDB 代理服务
-│   ├── Zhuiying.MainSite/   # 主站服务
-│   ├── Zhuiying.TgBot/      # TG 机器人服务
-│   └── Zhuiying.Shared/     # 共享代码库
-└── .gitignore
-```
-
-## 服务间通信
-- **MainSite <-> TmdbProxy**: 通过 Docker 网络内部 HTTP 调用 (`http://tmdbproxy:5001`).
-- **TgBot -> MainSite**: 通过 HTTP POST (`http://mainsite:5000/api/tg/messages`) 推送用户交互数据.
+## 开发配置
+- **MainSite 环境变量**: `ZhuiyingHubUrl`, `ADMIN_USER`, `ADMIN_PASSWORD` 已在 `docker-compose.yml` 中注入。
+- **Nginx 配置**: 位于 `nginx/default.conf`，包含域名分发规则。
+- **数据持久化**: 容器内 `/app/data` 已映射，重启不丢失用户数据。
 
 ---
 _由小拉 (default) 架构开发_
