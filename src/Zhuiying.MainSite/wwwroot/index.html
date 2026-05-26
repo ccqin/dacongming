@@ -195,25 +195,36 @@
         function toggleAdminModal() {
             document.getElementById('user-menu').style.display = 'none';
             const adminModal = document.getElementById('admin-modal') || document.createElement('div');
-            // 简单实现：弹出一个提示，或者你可以扩展成真正的管理面板
             if (!document.getElementById('admin-modal')) {
                 adminModal.id = 'admin-modal';
                 adminModal.innerHTML = `
                     <div class="modal" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
                         <h2>管理后台</h2>
-                        <div id="admin-stats" style="margin: 1rem 0; text-align: left;">加载中...</div>
+                        <div id="admin-stats" style="margin: 1rem 0; text-align: left; font-family: monospace; white-space: pre-wrap; word-break: break-all;">加载中...</div>
                         <button onclick="document.getElementById('admin-modal').style.display='none'">关闭</button>
                     </div>`;
                 document.body.appendChild(adminModal);
                 adminModal.style.cssText = 'display: flex; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; justify-content: center; align-items: center;';
                 
-                fetch(`${API}/api/admin/stats`, { headers: { 'Authorization': `Bearer ${token}` }})
-                    .then(res => res.json()).then(data => {
+                // Hub API.md 中没有 /stats，但有 /sources。我们展示 sources 来证明连通性。
+                fetch(`${API}/api/admin/sources`, { headers: { 'Authorization': `Bearer ${token}` }})
+                    .then(res => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.json();
+                    })
+                    .then(data => {
                         document.getElementById('admin-stats').innerHTML = `
-                            <p>总用户数: ${data.totalUsers ?? '未知'}</p>
-                            <p>待审核: ${data.pendingUsers ?? '未知'}</p>
+                            <p><strong> 管理接口连通成功！</strong></p>
+                            <p>当前数据源配置:</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
                         `;
-                    }).catch(() => document.getElementById('admin-stats').textContent = '加载失败');
+                    })
+                    .catch(err => {
+                        document.getElementById('admin-stats').innerHTML = `
+                            <p style="color: #ef4444">❌ 加载失败: ${err.message}</p>
+                            <p>请检查 Hub 服务是否在线。</p>
+                        `;
+                    });
             }
             adminModal.style.display = 'flex';
         }

@@ -80,7 +80,36 @@ app.MapGet("/api/me", (HttpRequest req) =>
     return Results.Unauthorized();
 });
 
-// 3. Fallback SPA Routing
+// 3. Admin Proxy (Forward to Hub)
+app.MapGet("/api/admin/{**path}", async (string path, HttpRequest req) =>
+{
+    try
+    {
+        var targetUrl = $"/api/admin/{path}";
+        Console.WriteLine($"[MainSite] Admin Proxying to Hub: {targetUrl}");
+        
+        // Clone headers (Authorization etc)
+        var hubReq = new HttpRequestMessage(HttpMethod.Get, targetUrl);
+        if (req.Headers.TryGetValue("Authorization", out var auth))
+        {
+            hubReq.Headers.Add("Authorization", auth);
+        }
+
+        var resp = await hubClient.SendAsync(hubReq);
+        if (!resp.IsSuccessStatusCode) 
+        {
+            return Results.StatusCode((int)resp.StatusCode);
+        }
+        var body = await resp.Content.ReadAsStringAsync();
+        return Results.Content(body, "application/json");
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(detail: ex.Message, statusCode: 500);
+    }
+});
+
+// 4. Fallback SPA Routing
 app.MapFallbackToFile("index.html");
 
 app.Run();
