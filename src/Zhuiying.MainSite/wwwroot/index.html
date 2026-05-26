@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>追影 | Zhuiying</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; --muted: #94a3b8; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); overflow-x: hidden; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 5%; background: rgba(15,23,42,0.95); position: sticky; top: 0; z-index: 100; border-bottom: 1px solid #334155; }
+        .logo { font-size: 1.5rem; font-weight: 800; color: var(--accent); letter-spacing: 1px; }
+        .nav-btn { background: var(--card); color: var(--text); border: 1px solid #475569; padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-size: 0.9rem; position: relative; }
+        .nav-btn:hover { background: #334155; }
+        .dropdown { display: none; position: absolute; top: 110%; right: 0; background: var(--card); border: 1px solid #475569; border-radius: 8px; min-width: 120px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); z-index: 101; }
+        .dropdown a { display: block; padding: 0.5rem 1rem; color: var(--text); text-decoration: none; cursor: pointer; }
+        .dropdown a:hover { background: #334155; }
+        
+        main { padding: 2rem 0; }
+        .hero { width: 90%; margin: 0 auto 2rem; border-radius: 16px; overflow: hidden; position: relative; height: 40vh; min-height: 250px; }
+        .hero img { width: 100%; height: 100%; object-fit: cover; filter: brightness(0.6); }
+        .hero-content { position: absolute; bottom: 2rem; left: 2rem; }
+        .hero h1 { font-size: 2.5rem; margin-bottom: 0.5rem; text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        
+        .category { margin-bottom: 2.5rem; width: 90%; margin-left: auto; margin-right: auto; }
+        .category h2 { font-size: 1.2rem; margin: 0 0 1rem 0; color: var(--accent); }
+        .scroll-list { display: flex; gap: 1rem; overflow-x: auto; padding-bottom: 1rem; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+        .scroll-list::-webkit-scrollbar { height: 6px; }
+        .scroll-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        .card { flex: 0 0 140px; scroll-snap-align: start; cursor: pointer; transition: transform 0.2s; }
+        .card:hover { transform: scale(1.05); }
+        .card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; }
+        .card p { font-size: 0.8rem; margin-top: 0.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        #login-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; justify-content: center; align-items: center; }
+        .modal { background: var(--card); padding: 2rem; border-radius: 12px; width: 90%; max-width: 350px; text-align: center; }
+        .modal input { width: 100%; padding: 0.8rem; margin: 0.5rem 0; background: #0f172a; border: 1px solid #475569; color: white; border-radius: 6px; }
+        .modal button { width: 100%; padding: 0.8rem; background: var(--accent); border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 1rem; }
+        .close-modal { position: absolute; top: 1rem; right: 1rem; background: transparent; border: none; color: white; font-size: 1.5rem; cursor: pointer; }
+        
+        .loading { text-align: center; padding: 3rem; color: var(--muted); }
+        .error { text-align: center; padding: 2rem; color: #ef4444; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">追影</div>
+        <div id="user-area">
+            <button id="auth-btn" class="nav-btn">登录</button>
+            <div id="user-menu" class="dropdown">
+                <a onclick="toggleAdminModal()">管理后台</a>
+                <a onclick="logout()">退出登录</a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <div class="hero">
+            <img id="hero-img" src="https://image.tmdb.org/t/p/original/8uVKlOJUhOeUv5F9Gn1p8nXk9gP.jpg" alt="Hero">
+            <div class="hero-content">
+                <h1 id="hero-title">正在加载...</h1>
+                <p id="hero-desc" style="color: #cbd5e1; max-width: 600px;">海量影视资源，一键搜索</p>
+            </div>
+        </div>
+
+        <div id="categories"></div>
+    </main>
+
+    <div id="login-modal">
+        <div class="modal">
+            <button class="close-modal" onclick="closeLogin()">&times;</button>
+            <h2 style="margin-bottom: 1rem;">用户登录</h2>
+            <input type="text" id="username" placeholder="用户名">
+            <input type="password" id="password" placeholder="密码">
+            <button onclick="doLogin()">登录</button>
+            <p id="login-msg" style="margin-top: 1rem; font-size: 0.8rem;"></p>
+        </div>
+    </div>
+
+    <script>
+        const API = '';
+        let token = localStorage.getItem('token');
+        
+        let currentUser = null;
+        async function init() {
+            currentUser = await checkAuth();
+            const btn = document.getElementById('auth-btn');
+            const menu = document.getElementById('user-menu');
+            
+            btn.textContent = currentUser ? currentUser : '登录';
+            if (currentUser) {
+                btn.onclick = () => menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+            } else {
+                btn.onclick = () => openLogin();
+            }
+            loadCategories();
+        }
+
+        // 关闭下拉菜单的全局点击监听
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('user-menu');
+            if (!e.target.closest('#user-area')) {
+                menu.style.display = 'none';
+            }
+        });
+
+        async function checkAuth() {
+            if (!token) return null;
+            try {
+                const res = await fetch(`${API}/api/me`, { headers: { 'Authorization': `Bearer ${token}` }});
+                if (!res.ok) { localStorage.removeItem('token'); return null; }
+                const data = await res.json();
+                return data.username;
+            } catch { return null; }
+        }
+
+        async function loadCategories() {
+            const cats = document.getElementById('categories');
+            const types = [
+                { name: '热门电影', type: 'movie', endpoint: '/api/movies?category=trending' },
+                { name: '即将上映', type: 'movie', endpoint: '/api/movies?category=upcoming' },
+                { name: '高分剧集', type: 'tv', endpoint: '/api/movies?category=top_rated' }
+            ];
+            
+            for (const cat of types) {
+                try {
+                    const res = await fetch(`${API}${cat.endpoint}`);
+                    if (!res.ok) throw new Error(res.status);
+                    const data = await res.json();
+                    const items = parseList(data);
+                    if (items.length === 0) continue;
+                    
+                    if (cat.name === '热门电影' && items[0].backdrop_path) {
+                        document.getElementById('hero-img').src = `https://image.tmdb.org/t/p/original/${items[0].backdrop_path}`;
+                        document.getElementById('hero-title').textContent = items[0].title || items[0].name;
+                    }
+
+                    const section = document.createElement('div');
+                    section.className = 'category';
+                    section.innerHTML = `
+                        <h2>${cat.name}</h2>
+                        <div class="scroll-list">
+                            ${items.slice(0, 15).map(i => `
+                                <div class="card">
+                                    <img src="https://image.tmdb.org/t/p/w342${i.poster_path}" loading="lazy" onerror="this.src='https://via.placeholder.com/140x210?text=No+Image'">
+                                    <p>${i.title || i.name}</p>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                    cats.appendChild(section);
+                } catch (e) {
+                    cats.innerHTML += `<div class="error">加载 ${cat.name} 失败: ${e.message} (请检查 Hub 服务)</div>`;
+                }
+            }
+        }
+
+        function parseList(data) {
+            if (Array.isArray(data)) return data;
+            if (data.results && Array.isArray(data.results)) return data.results;
+            if (data.data && Array.isArray(data.data)) return data.data;
+            return [];
+        }
+
+        function openLogin() { document.getElementById('login-modal').style.display = 'flex'; }
+        function closeLogin() { document.getElementById('login-modal').style.display = 'none'; }
+        
+        async function doLogin() {
+            const u = document.getElementById('username').value;
+            const p = document.getElementById('password').value;
+            const msg = document.getElementById('login-msg');
+            try {
+                const res = await fetch(`${API}/api/auth/login`, {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                const data = await res.json();
+                if (data.token) {
+                    token = data.token;
+                    localStorage.setItem('token', token);
+                    closeLogin();
+                    location.reload();
+                } else {
+                    msg.textContent = data.message || '登录失败';
+                    msg.style.color = '#ef4444';
+                }
+            } catch { msg.textContent = '网络错误'; }
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            location.reload();
+        }
+
+        function toggleAdminModal() {
+            document.getElementById('user-menu').style.display = 'none';
+            const adminModal = document.getElementById('admin-modal') || document.createElement('div');
+            if (!document.getElementById('admin-modal')) {
+                adminModal.id = 'admin-modal';
+                adminModal.innerHTML = `
+                    <div class="modal" style="max-width: 500px; max-height: 80vh; overflow-y: auto;">
+                        <h2>管理后台</h2>
+                        <div id="admin-stats" style="margin: 1rem 0; text-align: left; font-family: monospace; white-space: pre-wrap; word-break: break-all;">加载中...</div>
+                        <button onclick="document.getElementById('admin-modal').style.display='none'">关闭</button>
+                    </div>`;
+                document.body.appendChild(adminModal);
+                adminModal.style.cssText = 'display: flex; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; justify-content: center; align-items: center;';
+                
+                // Hub API.md 中没有 /stats，但有 /sources。我们展示 sources 来证明连通性。
+                fetch(`${API}/api/admin/sources`, { headers: { 'Authorization': `Bearer ${token}` }})
+                    .then(res => {
+                        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                        return res.json();
+                    })
+                    .then(data => {
+                        document.getElementById('admin-stats').innerHTML = `
+                            <p><strong> 管理接口连通成功！</strong></p>
+                            <p>当前数据源配置:</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        `;
+                    })
+                    .catch(err => {
+                        document.getElementById('admin-stats').innerHTML = `
+                            <p style="color: #ef4444">❌ 加载失败: ${err.message}</p>
+                            <p>请检查 Hub 服务是否在线。</p>
+                        `;
+                    });
+            }
+            adminModal.style.display = 'flex';
+        }
+
+        init();
+    </script>
+</body>
+</html>

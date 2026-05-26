@@ -3,12 +3,12 @@ services:
     image: nginx:alpine
     container_name: zhuiying-nginx
     ports:
-      - "80:80"
+      - "8980:80"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
     depends_on:
-      - zhuiyinghub
+      - mainsite
     networks:
       - zhuiying-net
 
@@ -30,17 +30,6 @@ services:
     networks:
       - zhuiying-net
 
-  pansou:
-    image: ghcr.io/fish2018/pansou:latest
-    container_name: zhuiying-pansou
-    environment:
-      - TZ=Asia/Shanghai
-    volumes:
-      - pansou_data:/app/config
-    restart: unless-stopped
-    networks:
-      - zhuiying-net
-
   mainsite:
     build:
       context: .
@@ -52,29 +41,15 @@ services:
       - "5000:5000"
     environment:
       - ASPNETCORE_URLS=http://0.0.0.0:5000
+      - ZhuiyingHubUrl=https://zhuiyinghub.19856789.xyz
+      - ADMIN_USER=ccqin
+      - ADMIN_PASSWORD=bukeshuo123!
     restart: unless-stopped
-    networks:
-      - zhuiying-net
-
-  tgbot:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        TARGET: TgBot
-    container_name: zhuiying-tgbot
-    environment:
-      - TG_BOT_TOKEN=${TG_BOT_TOKEN:-YOUR_TOKEN}
-      - MAIN_SITE_URL=http://mainsite:5000
-    restart: unless-stopped
-    depends_on:
-      - mainsite
     networks:
       - zhuiying-net
 
 volumes:
   tmdb_data:
-  pansou_data:
 
 networks:
   zhuiying-net:
