@@ -92,7 +92,7 @@ app.MapGet("/api/admin/{**path}", async (string path, HttpRequest req) =>
         var hubReq = new HttpRequestMessage(HttpMethod.Get, targetUrl);
         if (req.Headers.TryGetValue("Authorization", out var auth))
         {
-            hubReq.Headers.Add("Authorization", auth);
+            hubReq.Headers.Add("Authorization", auth.ToString());
         }
 
         var resp = await hubClient.SendAsync(hubReq);
