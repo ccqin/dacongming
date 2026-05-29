@@ -52,6 +52,10 @@
 <body>
     <header>
         <div class="logo">追影</div>
+        <div style="display: flex; align-items: center; gap: 0.5rem; flex: 1; justify-content: center; max-width: 400px; margin: 0 1rem;">
+            <input id="search-input" type="text" placeholder="搜索网盘资源..." style="flex: 1; padding: 0.5rem 0.8rem; background: var(--card); border: 1px solid #475569; color: white; border-radius: 6px; font-size: 0.9rem;">
+            <button id="search-btn" class="nav-btn" style="padding: 0.5rem 1rem;">搜索</button>
+        </div>
         <div id="user-area">
             <button id="auth-btn" class="nav-btn">登录</button>
             <div id="user-menu" class="dropdown">
@@ -101,6 +105,73 @@
                 btn.onclick = () => openLogin();
             }
             loadCategories();
+            setupSearch();
+        }
+
+        // 搜索功能 (POST /api/search)
+        function setupSearch() {
+            const searchInput = document.getElementById('search-input');
+            const searchBtn = document.getElementById('search-btn');
+            if (!searchBtn || !searchInput) return;
+
+            searchBtn.onclick = async () => {
+                const keyword = searchInput.value.trim();
+                if (!keyword) return;
+                searchBtn.textContent = '搜索中...';
+                searchBtn.disabled = true;
+
+                try {
+                    const res = await fetch(`${API}/api/search`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ keyword: keyword, cloudTypes: [], forceRefresh: false })
+                    });
+                    const data = await res.json();
+                    showSearchResults(keyword, data);
+                } catch (e) {
+                    showSearchResults(keyword, { success: false, error: '搜索失败: ' + e.message });
+                } finally {
+                    searchBtn.textContent = '搜索';
+                    searchBtn.disabled = false;
+                }
+            };
+
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') searchBtn.click();
+            });
+        }
+
+        function showSearchResults(keyword, data) {
+            let resultsDiv = document.getElementById('search-results');
+            if (!resultsDiv) {
+                resultsDiv = document.createElement('div');
+                resultsDiv.id = 'search-results';
+                resultsDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 300; display: flex; justify-content: center; align-items: flex-start; padding: 3rem; overflow-y: auto;';
+                document.body.appendChild(resultsDiv);
+            }
+
+            resultsDiv.innerHTML = `
+                <div class="modal" style="max-width: 700px; width: 100%; max-height: 80vh; overflow-y: auto;">
+                    <h2>搜索结果: ${keyword}</h2>
+                    <button onclick="document.getElementById('search-results').remove()" style="margin-top: 0.5rem;">关闭</button>
+                    <div id="search-results-content" style="margin-top: 1rem; text-align: left;"></div>
+                </div>
+            `;
+
+            const contentDiv = resultsDiv.querySelector('#search-results-content');
+            if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+                contentDiv.innerHTML = data.data.map(item => `
+                    <div style="background: var(--bg); padding: 0.75rem; border-radius: 8px; margin-bottom: 0.5rem;">
+                        <p><strong>网盘:</strong> ${item.cloudType}</p>
+                        <p><strong>链接:</strong> <a href="${item.url}" target="_blank" style="color: var(--accent);">打开链接</a></p>
+                        ${item.password ? `<p><strong>提取码:</strong> ${item.password}</p>` : ''}
+                        ${item.note ? `<p><strong>备注:</strong> ${item.note}</p>` : ''}
+                        ${item.source ? `<p><strong>来源:</strong> ${item.source}</p>` : ''}
+                    </div>
+                `).join('');
+            } else {
+                contentDiv.innerHTML = `<p style="color: var(--muted);">未找到相关资源 ${data.error || ''}</p>`;
+            }
         }
 
         // 关闭下拉菜单的全局点击监听
@@ -128,7 +199,7 @@
             const types = [
                 { name: '热门电影', type: 'movie', endpoint: '/api/movies?category=trending' },
                 { name: '最新上架', type: 'movie', endpoint: '/api/movies?category=upcoming' },
-                { name: '高分推荐', type: 'tv', endpoint: '/api/movies?category=top_rated' }
+                { name: '热门剧集', type: 'tv', endpoint: '/api/movies?category=trending' }
             ];
             
             for (const cat of types) {
@@ -149,7 +220,8 @@
                 cats.appendChild(section);
 
                 try {
-                    const res = await fetch(`${API}${cat.endpoint}`);
+                    // Pass type parameter to MainSite backend
+                    const res = await fetch(`${API}${cat.endpoint}&type=${cat.type}`);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     const items = parseList(data);
@@ -165,10 +237,10 @@
                         document.getElementById('hero-title').textContent = items[0].title || items[0].name;
                     }
 
-                    // 渲染卡片
+                    // 渲染卡片 (添加点击查看详情)
                     const listHtml = items.slice(0, 15).map(i => `
-                        <div class="card">
-                            <img src="https://image.tmdb.org/t/p/w342${i.poster_path}" loading="lazy" 
+                        <div class="card" onclick="showDetail(${i.tmdbId || i.id}, '${cat.type}')">
+                            <img src="https://image.tmdb.org/t/p/w342${i.poster_path || i.posterPath}" loading="lazy" 
                                  onerror="this.onerror=null; this.src='https://placehold.co/140x210/1e293b/94a3b8?text=No+Image'; this.style.objectFit='contain'">
                             <p>${i.title || i.name}</p>
                         </div>
@@ -254,6 +326,95 @@
                     });
             }
             adminModal.style.display = 'flex';
+        }
+
+        // 影视详情弹窗
+        async function showDetail(tmdbId, type = 'movie') {
+            let detailModal = document.getElementById('detail-modal');
+            if (!detailModal) {
+                detailModal = document.createElement('div');
+                detailModal.id = 'detail-modal';
+                detailModal.style.cssText = 'display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 250; justify-content: center; align-items: center; overflow-y: auto;';
+                detailModal.innerHTML = `
+                    <div class="modal" style="max-width: 600px; width: 90%; max-height: 85vh; overflow-y: auto;">
+                        <div id="detail-content"></div>
+                        <button onclick="closeDetailModal()" style="margin-top: 1rem;">关闭</button>
+                    </div>
+                `;
+                document.body.appendChild(detailModal);
+            }
+            
+            detailModal.style.display = 'flex';
+            document.getElementById('detail-content').innerHTML = '<p style="text-align: center; padding: 2rem;">加载中...</p>';
+
+            try {
+                const res = await fetch(`${API}/api/movies/${tmdbId}?type=${type}`);
+                const data = await res.json();
+                renderDetailModal(tmdbId, type, data);
+            } catch (e) {
+                document.getElementById('detail-content').innerHTML = `<p style="color: #ef4444;">加载失败: ${e.message}</p>`;
+            }
+        }
+
+        function renderDetailModal(tmdbId, type, data) {
+            const item = data.results?.[0] || data.data || {};
+            const content = document.getElementById('detail-content');
+            
+            if (!item.title && !item.tmdbId) {
+                content.innerHTML = '<p style="color: var(--muted);">暂无详情数据</p>';
+                return;
+            }
+
+            let html = `
+                <div style="display: flex; gap: 1rem; margin-bottom: 1rem;">
+                    <img src="https://image.tmdb.org/t/p/w300${item.posterPath || item.poster_path || ''}" 
+                         style="width: 120px; border-radius: 8px; flex-shrink: 0;" 
+                         onerror="this.style.display='none'">
+                    <div>
+                        <h2>${item.title || item.name || '未知'}</h2>
+                        ${item.releaseDate ? `<p style="color: var(--muted);">${item.releaseDate} | 评分 ${item.tmdbVoteAverage || item.voteAverage || 'N/A'}</p>` : ''}
+                        ${item.overview ? `<p style="margin-top: 0.5rem; font-size: 0.9rem; line-height: 1.5;">${item.overview}</p>` : ''}
+                    </div>
+                </div>
+            `;
+
+            // 豆瓣信息
+            if (item.douban) {
+                html += `
+                    <div style="background: var(--bg); padding: 0.75rem; border-radius: 8px; margin-top: 0.5rem;">
+                        <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">豆瓣信息</h3>
+                        <p>评分: ${item.douban.rating || 'N/A'} (${item.douban.ratingCount || 0} 人)</p>
+                        ${item.douban.summary ? `<p style="font-size: 0.85rem; margin-top: 0.25rem;">${item.douban.summary}</p>` : ''}
+                    </div>
+                `;
+            }
+
+            // 搜索资源按钮
+            html += `
+                <button onclick="searchForResource('${item.title || item.name}')" 
+                        style="width: 100%; margin-top: 0.5rem; padding: 0.75rem; background: var(--accent); color: var(--bg); border: none; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: bold;">
+                    🔍 搜索网盘资源
+                </button>
+            `;
+
+            content.innerHTML = html;
+        }
+
+        function closeDetailModal() {
+            const modal = document.getElementById('detail-modal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        async function searchForResource(title) {
+            closeDetailModal();
+            // 复用搜索逻辑
+            const res = await fetch(`${API}/api/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword: title, cloudTypes: [], forceRefresh: false })
+            });
+            const data = await res.json();
+            showSearchResults(title, data);
         }
 
         init();
