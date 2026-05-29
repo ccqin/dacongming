@@ -32,8 +32,8 @@ app.MapGet("/api/movies", async (string? category = null) =>
         {
             "trending" => "/api/movie/trending?language=zh-CN",
             "upcoming" => "/api/movie/latest?language=zh-CN",
-            "top_rated" => "/api/movie/top_rated?language=zh-CN",
-            "tv" => "/api/movie/tv_trending?language=zh-CN",
+            "top_rated" => "/api/movie/latest?language=zh-CN", // Hub 暂未开放 top_rated，先用 latest 替代
+            "tv" => "/api/movie/trending?language=zh-CN",
             _ => "/api/movie/trending?language=zh-CN"
         };
 
