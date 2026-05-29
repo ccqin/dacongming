@@ -1,54 +1,82 @@
-# Zhuiying.Hub API 接口文档
+# 追影 (Zhuiying) 接口文档
 
-> **Base URL:** `https://zhuiyinghub.19856789.xyz`
-> **状态:** 在线运行
+> **最后更新:** 2026-05-29
+> **状态:** 双机部署运行中
 
-## 1. 影视数据 (TMDB 代理)
+---
 
-统一代理 TMDB 接口，解决跨域及网络访问问题。
+## 1. 前端统一入口 (MainSite)
 
-| 接口路径 | 方法 | 说明 | 示例 |
+前端仅与 MainSite 交互，MainSite 负责聚合数据并转发请求。
+**Base URL:** `http://zhuiying.19856789.xyz:8980` (或 IP 直连)
+
+###  影视列表接口
+
+前端调用以下接口获取分类数据，MainSite 会自动处理鉴权并转发给 Hub。
+
+| 分类参数 (`category`) | MainSite 路由 | 转发至 Hub 路径 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `/api/tmdb/trending` | GET | 获取近期热门影视 (Trending) | [查看](https://zhuiyinghub.19856789.xyz/api/tmdb/trending) |
-| `/api/tmdb/search` | GET | 搜索影视资源 | `/api/tmdb/search?query=流浪地球` |
-| `/api/tmdb/discover` | GET | 发现/筛选影视 | `/api/tmdb/discover?with_genres=28` |
-| `/api/tmdb/movie/{id}` | GET | 获取电影详情 | `/api/tmdb/movie/687163` |
-| `/api/tmdb/tv/{id}` | GET | 获取电视剧详情 | `/api/tmdb/tv/76479` |
+| **热门** | `GET /api/movies?category=trending` | `/api/movie/trending` | 获取近期热门影视 |
+| **最新** | `GET /api/movies?category=upcoming` | `/api/movie/latest` | 获取最新上映/即将上映 |
+| **高分** | `GET /api/movies?category=top_rated` | `/api/movie/latest` | *注：Hub 暂未开放 top_rated，暂用 latest 替代* |
 
-## 2. 聚合搜索 (PanSou / Hub)
-
-搜索网盘资源，数据已做扁平化处理，适合前端直接渲染。
-
-| 接口路径 | 方法 | 说明 | 示例 |
-| :--- | :--- | :--- | :--- |
-| `/api/hub/search` | GET | 全局聚合搜索 | [测试](https://zhuiyinghub.19856789.xyz/api/hub/search?q=测试) |
-
-**返回结构示例:**
+**返回格式 (MainSite 处理后):**
 ```json
 {
+  "page": 1,
   "results": [
     {
-      "name": "PanSou",
-      "items": [
-        {
-          "name": "资源名称",
-          "url": "网盘链接",
-          "password": "提取码",
-          "cloud_type": "网盘类型 (如阿里云盘)",
-          "datetime": "时间戳"
-        }
-      ]
+      "tmdbId": 12345,
+      "title": "电影名称",
+      "posterPath": "/path/to/poster.jpg",
+      "mediaType": "movie",
+      "releaseDate": "2026-01-01",
+      "voteAverage": 8.5
     }
   ]
 }
 ```
 
-## 3. 后台管理 (Admin)
+### 🔍 聚合搜索
 
-管理系统内部配置。
-
-| 接口路径 | 方法 | 说明 |
+| 接口 | 方法 | 说明 |
 | :--- | :--- | :--- |
-| `/api/admin/sources` | GET | 获取已配置的数据源列表 |
-| `/api/admin/sources` | POST | 添加新数据源配置 |
-| `/api/admin/sources` | DELETE | 移除指定数据源 |
+| `/api/hub/search?q=关键词` | GET | 调用 Hub 进行网盘资源聚合搜索 |
+
+---
+
+## 2. 数据中心 (Hub)
+
+供 MainSite 调用的底层数据服务。
+**Base URL:** `https://zhuiyinghub.19856789.xyz`
+
+###  TMDB 影视数据 (新路由)
+
+| 接口路径 | 方法 | 说明 | 参数示例 |
+| :--- | :--- | :--- | :--- |
+| `/api/movie/trending` | GET | 热门榜单 | `?language=zh-CN` |
+| `/api/movie/latest` | GET | 最新榜单 | `?language=zh-CN` |
+
+**返回格式 (Hub 原始格式):**
+```json
+{
+  "success": true,
+  "data": [ ... ] 
+}
+```
+
+### 🛠 系统接口
+
+| 接口 | 方法 | 说明 |
+| :--- | :--- | :--- |
+| `/health` | GET | 健康检查 |
+| `/api/admin/sources` | GET/POST/DELETE | 数据源管理 (需鉴权) |
+
+---
+
+## ⚠️ 注意事项
+
+1. **路由变更**: Hub 的路由已从 `/api/tmdb/...` 迁移至 `/api/movie/...`。
+2. **MainSite 缓存**: MainSite 不缓存 TMDB 原始数据，依赖 Hub 的缓存机制。
+3. **跨域**: MainSite 已配置 CORS，允许前端跨域访问。
+
