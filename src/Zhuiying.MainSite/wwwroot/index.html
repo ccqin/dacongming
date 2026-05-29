@@ -32,6 +32,13 @@
         .card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; }
         .card p { font-size: 0.8rem; margin-top: 0.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         
+        /* 加载状态样式 */
+        .loading-state { display: flex; gap: 1rem; overflow-x: auto; padding-bottom: 1rem; }
+        .loading-card { flex: 0 0 140px; height: 210px; background: #334155; border-radius: 8px; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+        
+        .error { color: #ef4444; padding: 1rem; background: rgba(239, 68, 68, 0.1); border-radius: 8px; }
+        
         #login-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; justify-content: center; align-items: center; }
         .modal { background: var(--card); padding: 2rem; border-radius: 12px; width: 90%; max-width: 350px; text-align: center; }
         .modal input { width: 100%; padding: 0.8rem; margin: 0.5rem 0; background: #0f172a; border: 1px solid #475569; color: white; border-radius: 6px; }
@@ -116,41 +123,61 @@
 
         async function loadCategories() {
             const cats = document.getElementById('categories');
+            cats.innerHTML = ''; // 清空旧内容
+            
             const types = [
                 { name: '热门电影', type: 'movie', endpoint: '/api/movies?category=trending' },
-                { name: '即将上映', type: 'movie', endpoint: '/api/movies?category=upcoming' },
-                { name: '高分剧集', type: 'tv', endpoint: '/api/movies?category=top_rated' }
+                { name: '最新上架', type: 'movie', endpoint: '/api/movies?category=upcoming' },
+                { name: '高分推荐', type: 'tv', endpoint: '/api/movies?category=top_rated' }
             ];
             
             for (const cat of types) {
+                // 1. 显示加载状态
+                const section = document.createElement('div');
+                section.className = 'category';
+                section.id = `cat-${cat.name}`;
+                section.innerHTML = `
+                    <h2>${cat.name}</h2>
+                    <div class="scroll-list loading-state">
+                        <div class="card loading-card"></div>
+                        <div class="card loading-card"></div>
+                        <div class="card loading-card"></div>
+                        <div class="card loading-card"></div>
+                        <div class="card loading-card"></div>
+                    </div>
+                `;
+                cats.appendChild(section);
+
                 try {
                     const res = await fetch(`${API}${cat.endpoint}`);
-                    if (!res.ok) throw new Error(res.status);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     const data = await res.json();
                     const items = parseList(data);
-                    if (items.length === 0) continue;
                     
+                    if (items.length === 0) {
+                        section.querySelector('.scroll-list').innerHTML = '<p style="color:var(--muted); padding:1rem;">暂无数据</p>';
+                        continue;
+                    }
+                    
+                    // 更新 Hero (仅第一个分类)
                     if (cat.name === '热门电影' && items[0].backdrop_path) {
                         document.getElementById('hero-img').src = `https://image.tmdb.org/t/p/original/${items[0].backdrop_path}`;
                         document.getElementById('hero-title').textContent = items[0].title || items[0].name;
                     }
 
-                    const section = document.createElement('div');
-                    section.className = 'category';
-                    section.innerHTML = `
-                        <h2>${cat.name}</h2>
-                        <div class="scroll-list">
-                            ${items.slice(0, 15).map(i => `
-                                <div class="card">
-                                    <img src="https://image.tmdb.org/t/p/w342${i.poster_path}" loading="lazy" onerror="this.src='https://via.placeholder.com/140x210?text=No+Image'">
-                                    <p>${i.title || i.name}</p>
-                                </div>
-                            `).join('')}
+                    // 渲染卡片
+                    const listHtml = items.slice(0, 15).map(i => `
+                        <div class="card">
+                            <img src="https://image.tmdb.org/t/p/w342${i.poster_path}" loading="lazy" 
+                                 onerror="this.onerror=null; this.src='https://placehold.co/140x210/1e293b/94a3b8?text=No+Image'; this.style.objectFit='contain'">
+                            <p>${i.title || i.name}</p>
                         </div>
-                    `;
-                    cats.appendChild(section);
+                    `).join('');
+                    
+                    section.querySelector('.scroll-list').innerHTML = listHtml;
+
                 } catch (e) {
-                    cats.innerHTML += `<div class="error">加载 ${cat.name} 失败: ${e.message} (请检查 Hub 服务)</div>`;
+                    section.querySelector('.scroll-list').innerHTML = `<div class="error">加载失败: ${e.message}</div>`;
                 }
             }
         }
