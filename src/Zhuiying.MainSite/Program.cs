@@ -30,11 +30,11 @@ app.MapGet("/api/movies", async (string? category = null) =>
         // API.md endpoints: /api/tmdb/trending, /api/tmdb/discover, /api/tmdb/search
         var path = category switch
         {
-            "trending" => "/api/tmdb/trending?language=zh-CN",
-            "upcoming" => "/api/tmdb/discover?type=movie&language=zh-CN&sort_by=popularity.desc", // Fallback to discover
-            "top_rated" => "/api/tmdb/discover?type=movie&language=zh-CN&sort_by=vote_average.desc",
-            "tv" => "/api/tmdb/discover?type=tv&language=zh-CN&sort_by=popularity.desc",
-            _ => "/api/tmdb/trending?language=zh-CN"
+            "trending" => "/api/movie/trending?language=zh-CN",
+            "upcoming" => "/api/movie/latest?language=zh-CN",
+            "top_rated" => "/api/movie/top_rated?language=zh-CN",
+            "tv" => "/api/movie/tv_trending?language=zh-CN",
+            _ => "/api/movie/trending?language=zh-CN"
         };
 
         Console.WriteLine($"[MainSite] Proxying to Hub: {path}");
@@ -46,6 +46,22 @@ app.MapGet("/api/movies", async (string? category = null) =>
         }
 
         var body = await resp.Content.ReadAsStringAsync();
+        
+        // Transform Hub response format to TMDB-like format for frontend compatibility
+        // Hub: {"success":true, "data":[...]} -> TMDB: {"results":[...], "page":1}
+        try 
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("data", out var dataElement))
+            {
+                // Extract raw JSON string of the data array to avoid disposal issues
+                var resultsJson = dataElement.GetRawText();
+                var responseJson = $"{{\"page\":1,\"results\":{resultsJson}}}";
+                return Results.Content(responseJson, "application/json");
+            }
+        }
+        catch { /* Fallback to original body if parsing fails */ }
+        
         return Results.Content(body, "application/json");
     }
     catch (Exception ex)
@@ -101,6 +117,22 @@ app.MapGet("/api/admin/{**path}", async (string path, HttpRequest req) =>
             return Results.StatusCode((int)resp.StatusCode);
         }
         var body = await resp.Content.ReadAsStringAsync();
+        
+        // Transform Hub response format to TMDB-like format for frontend compatibility
+        // Hub: {"success":true, "data":[...]} -> TMDB: {"results":[...], "page":1}
+        try 
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("data", out var dataElement))
+            {
+                // Extract raw JSON string of the data array to avoid disposal issues
+                var resultsJson = dataElement.GetRawText();
+                var responseJson = $"{{\"page\":1,\"results\":{resultsJson}}}";
+                return Results.Content(responseJson, "application/json");
+            }
+        }
+        catch { /* Fallback to original body if parsing fails */ }
+        
         return Results.Content(body, "application/json");
     }
     catch (Exception ex)
