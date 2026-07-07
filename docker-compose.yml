@@ -3,14 +3,17 @@ services:
     image: nginx:alpine
     container_name: zhuiying-nginx
     ports:
-      - "8980:80"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     restart: unless-stopped
     depends_on:
       - mainsite
+      - zhuiyinghub
     networks:
-      - zhuiying-net
+      - limitless
 
   zhuiyinghub:
     build:
@@ -19,8 +22,8 @@ services:
       args:
         TARGET: Hub
     container_name: zhuiying-hub
-    ports:
-      - "5002:5002"
+    expose:
+      - "5002"
     environment:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - ASPNETCORE_URLS=http://0.0.0.0:5002
@@ -28,7 +31,7 @@ services:
       - tmdb_data:/app/data
     restart: unless-stopped
     networks:
-      - zhuiying-net
+      - limitless
 
   mainsite:
     build:
@@ -37,20 +40,36 @@ services:
       args:
         TARGET: MainSite
     container_name: zhuiying-mainsite
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       - ASPNETCORE_URLS=http://0.0.0.0:5000
-      - ZhuiyingHubUrl=https://zhuiyinghub.19856789.xyz
-      - ADMIN_USER=ccqin
-      - ADMIN_PASSWORD=bukeshuo123!
+      - ZhuiyingHubUrl=${HUB_URL}
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
     restart: unless-stopped
     networks:
-      - zhuiying-net
+      - limitless
+
+  tgbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: TgBot
+    container_name: zhuiying-tgbot
+    environment:
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN}
+      - MAIN_SITE_URL=http://zhuiying-mainsite:5000
+    restart: unless-stopped
+    depends_on:
+      - mainsite
+    networks:
+      - limitless
 
 volumes:
   tmdb_data:
 
 networks:
-  zhuiying-net:
-    driver: bridge
+  limitless:
+    external: true

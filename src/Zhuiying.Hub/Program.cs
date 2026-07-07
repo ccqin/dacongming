@@ -130,7 +130,122 @@ app.MapGet("/api/tmdb/movie/{id}/credits", async (int id, IHttpClientFactory f) 
 app.MapGet("/api/tmdb/tv/{id}/credits", async (int id, IHttpClientFactory f) =>
     await ProxyGet(f, $"tv/{id}/credits?api_key={tmdbApiKey}") is { } j ? Results.Content(j, "application/json") : Results.StatusCode(502));
 
-// ====== 🔍 聚合搜索模块 (/api/hub) ======
+// ====== 🎬 统一影视 API (API.md v1.0.0 规范) ======
+
+// GET /api/movie/trending - 热门影视
+app.MapGet("/api/movie/trending", async (string? type, string? region, int page, IHttpClientFactory f, IDbCache cache) =>
+{
+    var mediaType = type ?? "movie";
+    var key = $"trending?lang=zh-CN&page={page}&region={region ?? ""}";
+    var cached = await cache.Get(key);
+    if (cached != null) return Results.Content(cached, "application/json");
+    
+    // Fetch from TMDB trending
+    var client = f.CreateClient("tmdb");
+    var tmdbResp = await client.GetAsync($"trending/{(mediaType == "tv" ? "tv" : "movie")}/week?api_key={tmdbApiKey}&language=zh-CN&page={page}");
+    if (!tmdbResp.IsSuccessStatusCode) return Results.StatusCode(502);
+    var raw = await tmdbResp.Content.ReadAsStringAsync();
+    
+    using var doc = JsonDocument.Parse(raw);
+    var results = doc.RootElement.GetProperty("results").EnumerateArray()
+        .Select(e => TmdbToDto(e, mediaType))
+        .ToList();
+    
+    var response = ApiResponse(results);
+    if (results.Count > 0) await cache.Set(key, response, 1800); // 30 min
+    return Results.Content(response, "application/json");
+});
+
+// GET /api/movie/latest - 最新影视
+app.MapGet("/api/movie/latest", async (string? type, int page, IHttpClientFactory f, IDbCache cache) =>
+{
+    var mediaType = type ?? "movie";
+    var key = $"latest?lang=zh-CN&page={page}&type={mediaType}";
+    var cached = await cache.Get(key);
+    if (cached != null) return Results.Content(cached, "application/json");
+    
+    var client = f.CreateClient("tmdb");
+    var path = mediaType == "tv" 
+        ? $"tv/on_the_air?api_key={tmdbApiKey}&language=zh-CN&page={page}"
+        : $"movie/now_playing?api_key={tmdbApiKey}&language=zh-CN&page={page}";
+    
+    var tmdbResp = await client.GetAsync(path);
+    if (!tmdbResp.IsSuccessStatusCode) return Results.StatusCode(502);
+    var raw = await tmdbResp.Content.ReadAsStringAsync();
+    
+    using var doc2 = JsonDocument.Parse(raw);
+    var results2 = doc2.RootElement.GetProperty("results").EnumerateArray()
+        .Select(e => TmdbToDto(e, mediaType))
+        .ToList();
+    
+    var response2 = ApiResponse(results2);
+    if (results2.Count > 0) await cache.Set(key, response2, 1800);
+    return Results.Content(response2, "application/json");
+});
+
+// GET /api/movie/{id} - 影视详情
+app.MapGet("/api/movie/{id:int}", async (int id, string? type, IHttpClientFactory f, IDbCache cache) =>
+{
+    var mediaType = type ?? "movie";
+    var key = $"detail/{mediaType}/{id}";
+    var cached = await cache.Get(key);
+    if (cached != null) return Results.Content(cached, "application/json");
+    
+    var client = f.CreateClient("tmdb");
+    var tmdbResp = await client.GetAsync($"{mediaType}/{id}?api_key={tmdbApiKey}&language=zh-CN");
+    if (!tmdbResp.IsSuccessStatusCode) return Results.StatusCode(502);
+    var raw = await tmdbResp.Content.ReadAsStringAsync();
+    
+    using var doc = JsonDocument.Parse(raw);
+    var el = doc.RootElement;
+    var detail = new {
+        tmdbId = id,
+        title = el.TryGetProperty("title", out var t) ? t.GetString() : el.TryGetProperty("name", out var n) ? n.GetString() : "",
+        originalTitle = el.TryGetProperty("original_title", out var ot) ? ot.GetString() : el.TryGetProperty("original_name", out var on) ? on.GetString() : "",
+        overview = el.TryGetProperty("overview", out var ov) ? ov.GetString() : "",
+        posterPath = el.TryGetProperty("poster_path", out var pp) ? pp.GetString() : "",
+        backdropPath = el.TryGetProperty("backdrop_path", out var bp) ? bp.GetString() : "",
+        tmdbVoteAverage = el.TryGetProperty("vote_average", out var va) ? va.GetDouble() : 0,
+        tmdbVoteCount = el.TryGetProperty("vote_count", out var vc) ? vc.GetInt32() : 0,
+        mediaType = mediaType,
+        releaseDate = el.TryGetProperty("release_date", out var rd) ? rd.GetString() : el.TryGetProperty("first_air_date", out var fad) ? fad.GetString() : ""
+    };
+    var response = ApiResponse(detail);
+    await cache.Set(key, response, 86400); // 24h
+    return Results.Content(response, "application/json");
+});
+
+// POST /api/search - 聚合网盘搜索 (MainSite 调用)
+app.MapPost("/api/search", async (HttpRequest req, HubService hub) =>
+{
+    var body = await JsonSerializer.DeserializeAsync<JsonElement>(req.Body, cancellationToken: req.HttpContext.RequestAborted);
+    var keyword = body.TryGetProperty("keyword", out var kw) ? kw.GetString() : null;
+    if (string.IsNullOrWhiteSpace(keyword)) 
+        return Results.BadRequest(new { success = false, data = (object?)null, error = "关键词不能为空" });
+    
+    var result = await hub.SearchAsync(keyword);
+    // Transform to flat list for MainSite/frontend
+    var flatItems = new List<object>();
+    foreach (var source in result.Results)
+    {
+        foreach (var item in source.Items)
+        {
+            if (item == null) continue;
+            var obj = item.AsObject();
+            flatItems.Add(new {
+                cloudType = obj.ContainsKey("cloud_type") ? obj["cloud_type"]?.GetValue<string>() : source.Name,
+                url = obj.ContainsKey("url") ? obj["url"]?.GetValue<string>() : "",
+                title = obj.ContainsKey("title") ? obj["title"]?.GetValue<string>() : "",
+                password = obj.ContainsKey("password") ? obj["password"]?.GetValue<string>() : null,
+                note = obj.ContainsKey("note") ? obj["note"]?.GetValue<string>() : null,
+                source = source.Name
+            });
+        }
+    }
+    return Results.Ok(new { success = true, data = flatItems, error = (string?)null });
+});
+
+// ====== 🔍 聚合搜索模块 (GET) ======
 app.MapGet("/api/hub/search", async (string q, HubService hub) =>
 {
     if (string.IsNullOrWhiteSpace(q)) return Results.BadRequest(new { error = "Missing 'q' parameter" });
@@ -150,6 +265,38 @@ app.MapDelete("/api/admin/sources/{name}", async (string name, HubService hub) =
 });
 
 app.Run();
+
+// ====== Helper 方法 ======
+static object TmdbToDto(JsonElement e, string mediaType)
+{
+    var id = e.TryGetProperty("id", out var idEl) ? idEl.GetInt32() : 0;
+    var title = e.TryGetProperty("title", out var t) ? t.GetString() 
+        : e.TryGetProperty("name", out var n) ? n.GetString() : "";
+    var overview = e.TryGetProperty("overview", out var ov) ? ov.GetString() : "";
+    var posterPath = e.TryGetProperty("poster_path", out var pp) ? pp.GetString() : "";
+    var voteAverage = e.TryGetProperty("vote_average", out var va) ? va.GetDouble() : 0;
+    var releaseDate = e.TryGetProperty("release_date", out var rd) ? rd.GetString() 
+        : e.TryGetProperty("first_air_date", out var fad) ? fad.GetString() : "";
+    
+    return new {
+        tmdbId = id,
+        title,
+        overview,
+        posterPath,
+        tmdbVoteAverage = voteAverage,
+        mediaType,
+        releaseDate
+    };
+}
+
+static string ApiResponse(object data, string? error = null)
+{
+    return JsonSerializer.Serialize(new {
+        success = error == null,
+        data,
+        error
+    });
+}
 
 // ====== 辅助方法 ======
 async Task<string?> ProxyGet(IHttpClientFactory f, string path)

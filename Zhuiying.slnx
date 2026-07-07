@@ -1,8 +1,8 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Zhuiying.MainSite/Zhuiying.MainSite.csproj" />
+    <Project Path="src/Zhuiying.Hub/Zhuiying.Hub.csproj" />
     <Project Path="src/Zhuiying.Shared/Zhuiying.Shared.csproj" />
     <Project Path="src/Zhuiying.TgBot/Zhuiying.TgBot.csproj" />
-    <Project Path="src/Zhuiying.TmdbProxy/Zhuiying.TmdbProxy.csproj" />
   </Folder>
 </Solution>

@@ -1,0 +1,23 @@
+# MainSite 服务 - 启动: docker compose -f docker-compose.main.yml up -d
+services:
+  mainsite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: MainSite
+    container_name: zhuiying-mainsite
+    expose:
+      - "5000"
+    environment:
+      - ASPNETCORE_URLS=http://0.0.0.0:5000
+      - ZhuiyingHubUrl=${HUB_URL}
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - dacongming
+
+networks:
+  dacongming:
+    external: true

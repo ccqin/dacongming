@@ -258,6 +258,21 @@ app.MapGet("/api/health", async ([FromServices] IHttpClientFactory? factory = nu
     return await ProxyHubAndTransform(factory, "/api/health");
 });
 
+// ================= TG Bot Messages =================
+var tgMessages = new List<TgMessageDto>();
+
+app.MapPost("/api/tg/messages", (TgMessageDto msg) =>
+{
+    tgMessages.Add(msg);
+    Console.WriteLine($"[MainSite] ← TgBot message from {msg.Username}: {msg.Text}");
+    return Results.Ok(new { success = true });
+});
+
+app.MapGet("/api/tg/messages", () =>
+{
+    return Results.Ok(tgMessages);
+});
+
 // ================= Auth (Simplified) =================
 var tokens = new Dictionary<string, (string User, DateTime Expires)>();
 

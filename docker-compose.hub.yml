@@ -1,0 +1,118 @@
+# Hub + 搜索服务编排 - 启动: docker compose -f docker-compose.hub.yml up -d
+services:
+  zhuiyinghub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: Hub
+    container_name: zhuiying-hub
+    expose:
+      - "5002"
+    environment:
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - ASPNETCORE_URLS=http://0.0.0.0:5002
+    volumes:
+      - tmdb_data:/app/data
+    restart: unless-stopped
+    networks:
+      - dacongming
+
+  tgbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: TgBot
+    container_name: zhuiying-tgbot
+    environment:
+      - TG_BOT_TOKEN=${TG_BOT_TOKEN}
+      - MAIN_SITE_URL=${MAIN_SITE_URL}
+    restart: unless-stopped
+    networks:
+      - dacongming
+
+  limitless-search:
+    image: limitless-search:latest
+    container_name: limitless-search
+    ports:
+      - "3200:3200"
+      - "8888:8888"
+    environment:
+      - ASYNC_PLUGIN_ENABLED=true
+      - ASYNC_RESULT_THRESHOLD=10
+      - CACHE_TTL=60
+      - ENABLED_PLUGINS=labi,zhizhen,shandian,duoduo,muou,wanou,hunhepan,jikepan,panwiki,pansearch,panta,qupansou,hdr4k,pan666,susu,thepiratebay,xuexizhinan,panyq,ouge,huban,cyg,erxiao,miaoso,fox4k,pianku,clmao,wuji,cldi,xiaozhang,libvio,leijing,xb6v,xys,ddys,hdmoli,yuhuage,u3c3,clxiong,jutoushe,sdso,xiaoji,xdyh,haisou,bixin,djgou,nyaa,xinjuc,aikanzy,qupanshe,xdpan,discourse,yunsou,qqpd,ahhhhfs,nsgame,gying,quark4k,quarksoo,sousou,ash
+      - ASYNC_RESPONSE_TIMEOUT=4
+      - CHANNELS=tgsearchers4,Aliyun_4K_Movies,bdbdndn11,yunpanx,bsbdbfjfjff,yp123pan,sbsbsnsqq,yunpanxunlei,tianyifc,BaiduCloudDisk,txtyzy,peccxinpd,gotopan,PanjClub,kkxlzy,baicaoZY,MCPH01,MCPH02,MCPH03,bdwpzhpd,ysxb48,jdjdn1111,yggpan,MCPH086,zaihuayun,Q66Share,ucwpzy,shareAliyun,alyp_1,dianyingshare,Quark_Movies,XiangxiuNBB,ydypzyfx,ucquark,xx123pan,yingshifenxiang123,zyfb123,tyypzhpd,tianyirigeng,cloudtianyi,hdhhd21,Lsp115,oneonefivewpfx,qixingzhenren,taoxgzy,Channel_Shares_115,tyysypzypd,vip115hot,wp123zy,yunpan139,yunpan189,yunpanuc,yydf_hzl,leoziyuan,pikpakpan,Q_dongman,yoyokuakeduanju,TG654TG,WFYSFX02,QukanMovie,yeqingjie_GJG666,movielover8888_film3,Baidu_netdisk,D_wusun,FLMdongtianfudi,KaiPanshare,QQZYDAPP,rjyxfx,PikPak_Share_Channel,btzhi,newproductsourcing,cctv1211,duan_ju,QuarkFree,yunpanNB,kkdj001,xxzlzn,pxyunpanxunlei,jxwpzy,kuakedongman,liangxingzhinan,xiangnikanj,solidsexydoll,guoman4K,zdqxm,kduanju,cilidianying,CBduanju,SharePanFilms,dzsgx,BooksRealm,Oscar_4Kmovies,douerpan,baidu_yppan,Q_jilupian,Netdisk_Movies,yunpanquark,ammmziyuan,ciliziyuanku,cili8888,jzmm_123pan,gdsharing,dmhy_org,
+      - CACHE_MAX_SIZE=100
+      - PORT=8888
+      - CACHE_PATH=/app/cache
+      - WEB_PORT=3200
+      - CACHE_ENABLED=true
+      - TZ=Asia/Shanghai
+      - HOSTNAME=0.0.0.0
+      - NEXT_PUBLIC_API_BASE=http://127.0.0.1:8888
+      - NEXT_TELEMETRY_DISABLED=1
+      - AI_RANKINGS_DATA_DIR=/app/data/rankings
+      - ADMIN_DATA_DIR=/app/data/admin
+      - ASYNC_MAX_BACKGROUND_WORKERS=20
+      - ASYNC_MAX_BACKGROUND_TASKS=100
+      - ASYNC_CACHE_TTL_HOURS=1
+      - AUTH_ENABLED=false
+      - AUTH_TOKEN_EXPIRY=24
+    volumes:
+      - search_data:/app/data
+      - search_cache:/app/cache
+    restart: unless-stopped
+    networks:
+      - dacongming
+
+  pansou-pancheck:
+    image: silent7897/pansou-and-pancheck:latest
+    container_name: pansou-pancheck
+    ports:
+      - "1566:1566"
+    environment:
+      - CHECK_API_URL=http://pansou:8888/api/check/links
+      - SEARCH_API_URL=http://pansou:8888
+    restart: unless-stopped
+    depends_on:
+      - pansou
+    networks:
+      - dacongming
+
+  pansou:
+    image: ghcr.io/fish2018/pansou:latest
+    container_name: pansou
+    ports:
+      - "8889:8888"
+    environment:
+      - ASYNC_PLUGIN_ENABLED=true
+      - PORT=8888
+      - ENABLED_PLUGINS=pansearch,panta,qupansou,hdr4k,susu,labi,muou,ouge,shandian,duoduo
+      - CACHE_PATH=/app/cache
+      - CACHE_ENABLED=true
+      - TZ=Asia/Shanghai
+      - ASYNC_RESPONSE_TIMEOUT=4
+      - ASYNC_MAX_BACKGROUND_WORKERS=20
+      - ASYNC_MAX_BACKGROUND_TASKS=100
+      - ASYNC_CACHE_TTL_HOURS=1
+      - CHANNELS=tgsearchers6,Aliyun_4K_Movies,bdbdndn11,yunpanx,bsbdbfjfjff,yp123pan,sbsbsnsqq,yunpanxunlei,tianyifc,BaiduCloudDisk,txtyzy,peccxinpd,gotopan,PanjClub,kkxlzy,baicaoZY,MCPH01,MCPH02,MCPH03,bdwpzhpd,ysxb48,jdjdn1111,yggpan,MCPH086,zaihuayun,Q66Share,ucwpzy,shareAliyun,alyp_1,dianyingshare,Quark_Movies,XiangxiuNBB,ydypzyfx,ucquark,xx123pan,yingshifenxiang123,zyfb123,tyypzhpd,tianyirigeng,cloudtianyi,hdhhd21,Lsp115,oneonefivewpfx,qixingzhenren,taoxgzy,Channel_Shares_115,tyysypzypd,vip115hot,wp123zy,yunpan139,yunpan189,yunpanuc,yydf_hzl,leoziyuan,pikpakpan,Q_dongman,yoyokuakeduanju,TG654TG,WFYSFX02,QukanMovie,yeqingjie_GJG666,movielover8888_film3,Baidu_netdisk,D_wusun,FLMdongtianfudi,KaiPanshare,QQZYDAPP,rjyxfx,PikPak_Share_Channel,btzhi,newproductsourcing,cctv1211,duan_ju,QuarkFree,yunpanNB,kkdj001,xxzlzn,pxyunpanxunlei,jxwpzy,kuakedongman,liangxingzhinan,xiangnikanj,solidsexydoll,guoman4K,zdqxm,kduanju,cilidianying,CBduanju,SharePanFilms,dzsgx,BooksRealm,Oscar_4Kmovies,douerpan,baidu_yppan,Q_jilupian,Netdisk_Movies,yunpanquark,ammmziyuan,ciliziyuanku,cili8888,jzmm_123pan
+      - AUTH_ENABLED=false
+      - AUTH_TOKEN_EXPIRY=24
+    volumes:
+      - pansou_cache:/app/cache
+    restart: unless-stopped
+    networks:
+      - dacongming
+
+volumes:
+  tmdb_data:
+  search_data:
+  search_cache:
+  pansou_cache:
+
+networks:
+  dacongming:
+    external: true
