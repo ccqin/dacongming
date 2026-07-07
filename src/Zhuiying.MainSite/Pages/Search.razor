@@ -1,0 +1,173 @@
+@page "/search"
+@inject SearchService SearchService
+@inject NavigationManager Navigation
+
+<PageTitle>搜索结果 - 追影</PageTitle>
+
+<div class="search-page">
+    <div class="search-header">
+        <h1>搜索: @Keyword</h1>
+        @if (!string.IsNullOrEmpty(Keyword))
+        {
+            <p>找到 @searchResults.Count 个结果</p>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="loading-container">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        </div>
+    }
+    else if (searchResults.Count == 0)
+    {
+        <div class="empty-state">
+            <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Default" />
+            <p>没有找到相关结果</p>
+        </div>
+    }
+    else
+    {
+        <div class="search-results-grid">
+            @foreach (var movie in searchResults)
+            {
+                <div class="movie-card" @onclick="() => GoToDetail(movie.TmdbId, movie.MediaType)">
+                    <img class="poster" 
+                         src="@GetPosterUrl(movie.PosterPath)" 
+                         alt="@movie.Title"
+                         loading="lazy" />
+                    <div class="card-title">@movie.Title</div>
+                    <div class="card-rating">
+                        ⭐ @movie.TmdbVoteAverage.ToString("F1")
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Keyword { get; set; }
+    
+    private List<Movie> searchResults = new();
+    private bool isLoading = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrEmpty(Keyword))
+        {
+            isLoading = true;
+            StateHasChanged();
+
+            try
+            {
+                searchResults = await SearchService.SearchMoviesAsync(Keyword);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"搜索失败: {ex.Message}");
+                searchResults.Clear();
+            }
+            finally
+            {
+                isLoading = false;
+            }
+        }
+        else
+        {
+            searchResults.Clear();
+        }
+    }
+
+    private void GoToDetail(int tmdbId, string mediaType)
+    {
+        Navigation.NavigateTo($"/movie/{mediaType}/{tmdbId}");
+    }
+
+    private string GetPosterUrl(string? posterPath)
+    {
+        if (string.IsNullOrEmpty(posterPath))
+            return "/images/placeholder-poster.svg";
+        return $"https://image.tmdb.org/t/p/w342{posterPath}";
+    }
+}
+
+<style>
+    .search-page {
+        padding: 80px 5% 40px;
+    }
+
+    .search-header {
+        margin-bottom: 2rem;
+    }
+
+    .search-header h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 0.5rem;
+    }
+
+    .search-header p {
+        color: var(--zhui-muted);
+        font-size: 0.95rem;
+    }
+
+    .loading-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 400px;
+    }
+
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+        gap: 1rem;
+        color: var(--zhui-muted);
+    }
+
+    .empty-state p {
+        font-size: 1.1rem;
+    }
+
+    .search-results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .movie-card {
+        cursor: pointer;
+        transition: transform 0.25s ease;
+    }
+
+    .movie-card:hover {
+        transform: scale(1.05);
+    }
+
+    .movie-card .poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #1a1a2e;
+    }
+
+    .movie-card .card-title {
+        font-size: 0.9rem;
+        font-weight: 500;
+        margin-top: 0.75rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .movie-card .card-rating {
+        font-size: 0.8rem;
+        color: #fbbf24;
+        margin-top: 0.25rem;
+    }
+</style>

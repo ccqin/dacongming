@@ -274,6 +274,7 @@ static object TmdbToDto(JsonElement e, string mediaType)
         : e.TryGetProperty("name", out var n) ? n.GetString() : "";
     var overview = e.TryGetProperty("overview", out var ov) ? ov.GetString() : "";
     var posterPath = e.TryGetProperty("poster_path", out var pp) ? pp.GetString() : "";
+    var backdropPath = e.TryGetProperty("backdrop_path", out var bp) ? bp.GetString() : "";
     var voteAverage = e.TryGetProperty("vote_average", out var va) ? va.GetDouble() : 0;
     var releaseDate = e.TryGetProperty("release_date", out var rd) ? rd.GetString() 
         : e.TryGetProperty("first_air_date", out var fad) ? fad.GetString() : "";
@@ -283,6 +284,7 @@ static object TmdbToDto(JsonElement e, string mediaType)
         title,
         overview,
         posterPath,
+        backdropPath,
         tmdbVoteAverage = voteAverage,
         mediaType,
         releaseDate

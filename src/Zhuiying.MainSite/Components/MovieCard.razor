@@ -1,0 +1,67 @@
+@inject NavigationManager Navigation
+
+<div class="movie-card" @onclick="HandleClick">
+    <img class="poster" 
+         src="@MovieService.GetPosterUrl(Movie.PosterPath, "w342")" 
+         alt="@Movie.Title"
+         loading="lazy" />
+    
+    <div class="card-title">@Movie.Title</div>
+    
+    <div class="card-rating">
+        ⭐ @Movie.TmdbVoteAverage.ToString("F1")
+    </div>
+</div>
+
+@code {
+    [Parameter] public Movie Movie { get; set; } = null!;
+    [Parameter] public EventCallback OnClick { get; set; }
+    
+    [Inject] private MovieService MovieService { get; set; } = null!;
+
+    private async Task HandleClick()
+    {
+        if (OnClick.HasDelegate)
+        {
+            await OnClick.InvokeAsync();
+        }
+    }
+}
+
+<style>
+    .movie-card {
+        flex: 0 0 180px;
+        scroll-snap-align: start;
+        cursor: pointer;
+        transition: transform 0.25s ease;
+        position: relative;
+    }
+
+    .movie-card:hover {
+        transform: scale(1.08);
+        z-index: 10;
+    }
+
+    .movie-card .poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #1a1a2e;
+    }
+
+    .movie-card .card-title {
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-top: 0.5rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .movie-card .card-rating {
+        font-size: 0.75rem;
+        color: #fbbf24;
+        margin-top: 0.25rem;
+    }
+</style>

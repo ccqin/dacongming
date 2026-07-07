@@ -1,0 +1,110 @@
+@page "/"
+@inject MovieService MovieService
+@inject NavigationManager Navigation
+
+<PageTitle>追影 - 首页</PageTitle>
+
+<div class="home-page">
+    @if (isLoading)
+    {
+        <div class="loading-container">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        </div>
+    }
+    else
+    {
+        @* Hero Banner *@
+        @if (trendingMovies.Count > 0)
+        {
+            var hero = trendingMovies.First();
+            <section class="hero-banner" style="background-image: url('@MovieService.GetBackdropUrl(hero.BackdropPath)')">
+                <div class="hero-overlay"></div>
+                <div class="hero-content">
+                    <h1>@hero.Title</h1>
+                    <p class="hero-overview">@hero.Overview</p>
+                    <MudButton 
+                        Variant="Variant.Filled" 
+                        Color="Color.Primary" 
+                        Size="Size.Large"
+                        OnClick="() => GoToDetail(hero.TmdbId, hero.MediaType)">
+                        查看详情
+                    </MudButton>
+                </div>
+            </section>
+        }
+
+        @* 热门电影 *@
+        <section class="category-section">
+            <h2>🔥 热门电影</h2>
+            <div class="card-row">
+                @foreach (var movie in trendingMovies)
+                {
+                    <MovieCard Movie="movie" OnClick="() => GoToDetail(movie.TmdbId, movie.MediaType)" />
+                }
+            </div>
+        </section>
+
+        @* 最新上映 *@
+        <section class="category-section">
+            <h2>🎬 最新上映</h2>
+            <div class="card-row">
+                @foreach (var movie in latestMovies)
+                {
+                    <MovieCard Movie="movie" OnClick="() => GoToDetail(movie.TmdbId, movie.MediaType)" />
+                }
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private List<Movie> trendingMovies = new();
+    private List<Movie> latestMovies = new();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            trendingMovies = await MovieService.GetTrendingMoviesAsync();
+            latestMovies = await MovieService.GetLatestMoviesAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void GoToDetail(int id, string mediaType)
+    {
+        Navigation.NavigateTo($"/movie/{mediaType}/{id}");
+    }
+}
+
+<style>
+    .home-page {
+        padding-top: 60px;
+    }
+
+    .loading-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 60vh;
+    }
+
+    .hero-banner {
+        position: relative;
+        height: 70vh;
+        min-height: 450px;
+        max-height: 700px;
+        background-size: cover;
+        background-position: center;
+        display: flex;
+        align-items: flex-end;
+    }
+</style>

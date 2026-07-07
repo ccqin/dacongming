@@ -1,0 +1,117 @@
+@using Microsoft.AspNetCore.Components.Web
+@inject NavigationManager Navigation
+
+<header class="app-header">
+    <div class="header-content">
+        <div class="logo-section">
+            <a href="/" class="logo">追影</a>
+        </div>
+        
+        <nav class="nav-links">
+            <a href="/" class="nav-link">首页</a>
+            <a href="/movies" class="nav-link">电影</a>
+            <a href="/tv" class="nav-link">电视剧</a>
+        </nav>
+        
+        <div class="search-section">
+            <MudTextField 
+                @bind-Value="SearchText"
+                Placeholder="搜索影视..."
+                Variant="Variant.Outlined"
+                Adornment="Adornment.Start"
+                AdornmentIcon="@Icons.Material.Filled.Search"
+                Class="search-input"
+                Immediate="true"
+                Style="background: rgba(255,255,255,0.1); border-radius: 4px;"
+                @onkeyup="HandleSearch" />
+        </div>
+    </div>
+</header>
+
+@code {
+    private string SearchText { get; set; } = "";
+    
+    private void HandleSearch(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(SearchText))
+        {
+            Navigation.NavigateTo($"/search?keyword={Uri.EscapeDataString(SearchText)}");
+        }
+    }
+}
+
+<style>
+    .app-header {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        background: linear-gradient(to bottom, rgba(10,10,10,0.95), rgba(10,10,10,0));
+        padding: 1rem 0;
+        transition: background 0.3s;
+    }
+    
+    .header-content {
+        display: flex;
+        align-items: center;
+        gap: 2rem;
+        padding: 0 5%;
+        max-width: 100%;
+    }
+    
+    .logo-section {
+        flex-shrink: 0;
+    }
+    
+    .logo {
+        font-size: 1.8rem;
+        font-weight: 800;
+        color: var(--zhui-primary);
+        text-decoration: none;
+        letter-spacing: 2px;
+    }
+    
+    .nav-links {
+        display: flex;
+        gap: 1.5rem;
+        flex: 1;
+    }
+    
+    .nav-link {
+        color: var(--zhui-text);
+        text-decoration: none;
+        font-size: 0.95rem;
+        font-weight: 500;
+        transition: color 0.2s;
+    }
+    
+    .nav-link:hover {
+        color: var(--zhui-primary);
+    }
+    
+    .search-section {
+        flex: 0 0 300px;
+    }
+    
+    .search-input {
+        width: 100%;
+    }
+    
+    @@media (max-width: 768px) {
+        .header-content {
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .nav-links {
+            order: 3;
+            width: 100%;
+            justify-content: center;
+        }
+        
+        .search-section {
+            flex: 1;
+        }
+    }
+</style>
