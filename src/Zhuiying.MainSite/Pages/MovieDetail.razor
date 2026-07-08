@@ -15,14 +15,14 @@
     {
         @* 背景图 *@
         <section class="detail-backdrop">
-            <img src="@MovieService.GetBackdropUrl(movie.BackdropPath, "original")" alt="@movie.Title" />
+            <LazyImage Src="@MovieService.GetBackdropUrl(movie.BackdropPath, "original")" Alt="@movie.Title" CssClass="detail-backdrop-img" />
             <div class="backdrop-overlay"></div>
         </section>
 
         @* 详情内容 *@
         <section class="detail-info">
             <div class="detail-poster">
-                <img src="@MovieService.GetPosterUrl(movie.PosterPath, "w500")" alt="@movie.Title" />
+                <LazyImage Src="@MovieService.GetPosterUrl(movie.PosterPath, "w500")" Alt="@movie.Title" CssClass="detail-poster-img" />
             </div>
 
             <div class="detail-text">
@@ -78,6 +78,83 @@
                 </div>
             </div>
         </section>
+
+        @* 演员列表 *@
+        @if (movie.Credits != null && movie.Credits.Any())
+        {
+            <section class="detail-section">
+                <h2>🎭 演员阵容</h2>
+                <div class="cast-scroll">
+                    @foreach (var cast in movie.Credits)
+                    {
+                        <div class="cast-card">
+                            <div class="cast-avatar">
+                                @if (!string.IsNullOrEmpty(cast.ProfilePath))
+                                {
+                                    <LazyImage Src="@MovieService.GetPosterUrl(cast.ProfilePath, "w185")" Alt="@cast.Name" CssClass="cast-avatar-img" />
+                                }
+                                else
+                                {
+                                    <div class="cast-placeholder">👤</div>
+                                }
+                            </div>
+                            <div class="cast-name">@cast.Name</div>
+                            @if (!string.IsNullOrEmpty(cast.Character))
+                            {
+                                <div class="cast-character">@cast.Character</div>
+                            }
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        @* 相似推荐 *@
+        @if (movie.Similar != null && movie.Similar.Any())
+        {
+            <section class="detail-section">
+                <h2>🎬 相似推荐</h2>
+                <div class="similar-grid">
+                    @foreach (var item in movie.Similar)
+                    {
+                        <div class="similar-card" @onclick="@(() => NavigateToDetail(item.TmdbId, item.MediaType))">
+                            <LazyImage Src="@MovieService.GetPosterUrl(item.PosterPath, "w342")" Alt="@item.Title" CssClass="similar-card-img" />
+                            <div class="similar-info">
+                                <div class="similar-title">@item.Title</div>
+                                @if (item.TmdbVoteAverage > 0)
+                                {
+                                    <div class="similar-rating">⭐ @item.TmdbVoteAverage.ToString("F1")</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        @* 预告片 *@
+        @if (movie.Videos != null && movie.Videos.Any())
+        {
+            <section class="detail-section">
+                <h2>🎥 预告片</h2>
+                <div class="video-list">
+                    @foreach (var video in movie.Videos)
+                    {
+                        <div class="video-item">
+                            <div class="video-player">
+                                <iframe 
+                                    src="https://www.youtube.com/embed/@video.Key" 
+                                    frameborder="0" 
+                                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                    allowfullscreen>
+                                </iframe>
+                            </div>
+                            <div class="video-title">@video.Name</div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
     }
 </div>
 
@@ -103,6 +180,11 @@
         {
             isLoading = false;
         }
+    }
+
+    private void NavigateToDetail(int tmdbId, string mediaType)
+    {
+        Navigation.NavigateTo($"/movie/{mediaType}/{tmdbId}");
     }
 }
 
@@ -240,6 +322,159 @@
 
     .actions {
         margin-top: 2rem;
+    }
+
+    /* 新增板块通用样式 */
+    .detail-section {
+        margin: 3rem 5%;
+    }
+
+    .detail-section h2 {
+        font-size: 1.5rem;
+        margin-bottom: 1.5rem;
+        color: var(--zhui-text);
+    }
+
+    /* 演员列表 */
+    .cast-scroll {
+        display: flex;
+        gap: 1.5rem;
+        overflow-x: auto;
+        padding-bottom: 1rem;
+        scrollbar-width: thin;
+        scrollbar-color: var(--zhui-surface) transparent;
+    }
+
+    .cast-scroll::-webkit-scrollbar {
+        height: 6px;
+    }
+
+    .cast-scroll::-webkit-scrollbar-thumb {
+        background: var(--zhui-surface);
+        border-radius: 3px;
+    }
+
+    .cast-card {
+        flex: 0 0 120px;
+        text-align: center;
+    }
+
+    .cast-avatar {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        overflow: hidden;
+        margin-bottom: 0.75rem;
+        background: var(--zhui-surface);
+    }
+
+    .cast-avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .cast-placeholder {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 3rem;
+        color: var(--zhui-muted);
+    }
+
+    .cast-name {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--zhui-text);
+        margin-bottom: 0.25rem;
+    }
+
+    .cast-character {
+        font-size: 0.8rem;
+        color: var(--zhui-muted);
+    }
+
+    /* 相似推荐 */
+    .similar-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .similar-card {
+        cursor: pointer;
+        transition: transform 0.3s ease;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .similar-card:hover {
+        transform: translateY(-8px);
+    }
+
+    .similar-card img {
+        width: 100%;
+        aspect-ratio: 2/3;
+        object-fit: cover;
+        display: block;
+    }
+
+    .similar-info {
+        padding: 0.75rem;
+        background: var(--zhui-surface);
+    }
+
+    .similar-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--zhui-text);
+        margin-bottom: 0.25rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .similar-rating {
+        font-size: 0.85rem;
+        color: #fbbf24;
+    }
+
+    /* 预告片 */
+    .video-list {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .video-item {
+        width: 100%;
+        max-width: 800px;
+    }
+
+    .video-player {
+        position: relative;
+        width: 100%;
+        padding-bottom: 56.25%;
+        background: var(--zhui-surface);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .video-player iframe {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+    }
+
+    .video-title {
+        margin-top: 0.5rem;
+        font-size: 1rem;
+        color: var(--zhui-text);
     }
 
     @@media (max-width: 768px) {

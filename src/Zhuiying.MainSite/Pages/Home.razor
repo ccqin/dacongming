@@ -7,9 +7,33 @@
 <div class="home-page">
     @if (isLoading)
     {
-        <div class="loading-container">
-            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
-        </div>
+        @* 骨架屏 - Hero Banner *@
+        <div class="skeleton-hero"></div>
+        
+        @* 骨架屏 - 分类区域 *@
+        <section class="category-section">
+            <div class="skeleton-title"></div>
+            <div class="card-row">
+                @for (int i = 0; i < 6; i++)
+                {
+                    <div class="skeleton-card">
+                        <div class="skeleton-poster"></div>
+                    </div>
+                }
+            </div>
+        </section>
+        
+        <section class="category-section">
+            <div class="skeleton-title"></div>
+            <div class="card-row">
+                @for (int i = 0; i < 6; i++)
+                {
+                    <div class="skeleton-card">
+                        <div class="skeleton-poster"></div>
+                    </div>
+                }
+            </div>
+        </section>
     }
     else
     {
@@ -54,20 +78,42 @@
                 }
             </div>
         </section>
+
+        @* 热门剧集 *@
+        @if (trendingTvs.Count > 0)
+        {
+            <section class="category-section">
+                <h2>📺 热门剧集</h2>
+                <div class="card-row">
+                    @foreach (var tv in trendingTvs)
+                    {
+                        <MovieCard Movie="tv" OnClick="() => GoToDetail(tv.TmdbId, tv.MediaType)" />
+                    }
+                </div>
+            </section>
+        }
     }
 </div>
 
 @code {
     private List<Movie> trendingMovies = new();
     private List<Movie> latestMovies = new();
+    private List<Movie> trendingTvs = new();
     private bool isLoading = true;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            trendingMovies = await MovieService.GetTrendingMoviesAsync();
-            latestMovies = await MovieService.GetLatestMoviesAsync();
+            var trendingTask = MovieService.GetTrendingMoviesAsync();
+            var latestTask = MovieService.GetLatestMoviesAsync();
+            var tvsTask = MovieService.GetTrendingMoviesAsync(type: "tv");
+
+            await Task.WhenAll(trendingTask, latestTask, tvsTask);
+
+            trendingMovies = await trendingTask;
+            latestMovies = await latestTask;
+            trendingTvs = await tvsTask;
         }
         catch (Exception ex)
         {
@@ -90,11 +136,42 @@
         padding-top: 60px;
     }
 
-    .loading-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 60vh;
+    /* Skeleton Loading */
+    .skeleton-hero {
+        width: 100%;
+        height: 70vh;
+        min-height: 450px;
+        background: linear-gradient(90deg, #1a1a2e 25%, #252540 50%, #1a1a2e 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.8s infinite;
+    }
+
+    .skeleton-title {
+        width: 180px;
+        height: 24px;
+        border-radius: 4px;
+        margin-bottom: 1rem;
+        background: linear-gradient(90deg, #1a1a2e 25%, #252540 50%, #1a1a2e 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.8s infinite;
+    }
+
+    .skeleton-card {
+        flex: 0 0 180px;
+    }
+
+    .skeleton-poster {
+        width: 100%;
+        aspect-ratio: 2/3;
+        border-radius: 8px;
+        background: linear-gradient(90deg, #1a1a2e 25%, #252540 50%, #1a1a2e 75%);
+        background-size: 200% 100%;
+        animation: shimmer 1.8s infinite;
+    }
+
+    @@keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
     }
 
     .hero-banner {
@@ -106,5 +183,23 @@
         background-position: center;
         display: flex;
         align-items: flex-end;
+        animation: heroFadeIn 1.2s ease-out;
+    }
+
+    @@keyframes heroFadeIn {
+        from { opacity: 0; transform: scale(1.05); }
+        to { opacity: 1; transform: scale(1); }
+    }
+
+    .category-section {
+        animation: slideUp 0.6s ease-out both;
+    }
+
+    .category-section:nth-child(2) { animation-delay: 0.1s; }
+    .category-section:nth-child(3) { animation-delay: 0.2s; }
+
+    @@keyframes slideUp {
+        from { opacity: 0; transform: translateY(30px); }
+        to { opacity: 1; transform: translateY(0); }
     }
 </style>

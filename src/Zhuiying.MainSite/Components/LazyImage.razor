@@ -1,0 +1,9 @@
+@namespace Zhuiying.MainSite.Components
+
+<img src="@Src" alt="@Alt" class="@CssClass" loading="lazy" />
+
+@code {
+    [Parameter] public string Src { get; set; } = "";
+    [Parameter] public string Alt { get; set; } = "";
+    [Parameter] public string CssClass { get; set; } = "";
+}

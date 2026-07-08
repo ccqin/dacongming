@@ -148,6 +148,70 @@ body {
     height: 4px;
 }
 
+.card-row::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.card-row::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 2px;
+}
+
+/* Responsive Design */
+@media (max-width: 767px) {
+    /* Mobile: Hero Banner */
+    .hero-banner {
+        height: 50vh;
+        min-height: 350px;
+    }
+
+    .hero-banner h1 {
+        font-size: 2rem;
+    }
+
+    .hero-banner .hero-overview {
+        font-size: 0.9rem;
+        -webkit-line-clamp: 2;
+    }
+
+    .hero-banner .hero-content {
+        left: 5%;
+        right: 5%;
+        max-width: 100%;
+    }
+
+    /* Mobile: Cards */
+    .movie-card {
+        flex: 0 0 140px;
+    }
+
+    .category-section {
+        padding: 0 4%;
+    }
+
+    .category-section h2 {
+        font-size: 1.1rem;
+    }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    /* Tablet */
+    .hero-banner h1 {
+        font-size: 2.5rem;
+    }
+
+    .movie-card {
+        flex: 0 0 160px;
+    }
+}
+
+@media (min-width: 1024px) {
+    /* Desktop */
+    .hero-banner h1 {
+        font-size: 3rem;
+    }
+}
+
 .card-row::-webkit-scrollbar-thumb {
     background: #333;
     border-radius: 4px;

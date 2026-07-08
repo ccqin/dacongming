@@ -136,7 +136,7 @@ app.MapGet("/api/tmdb/tv/{id}/credits", async (int id, IHttpClientFactory f) =>
 app.MapGet("/api/movie/trending", async (string? type, string? region, int page, IHttpClientFactory f, IDbCache cache) =>
 {
     var mediaType = type ?? "movie";
-    var key = $"trending?lang=zh-CN&page={page}&region={region ?? ""}";
+    var key = $"trending?type={mediaType}&lang=zh-CN&page={page}&region={region ?? ""}";
     var cached = await cache.Get(key);
     if (cached != null) return Results.Content(cached, "application/json");
     
@@ -183,7 +183,7 @@ app.MapGet("/api/movie/latest", async (string? type, int page, IHttpClientFactor
     return Results.Content(response2, "application/json");
 });
 
-// GET /api/movie/{id} - 影视详情
+// GET /api/movie/{id} - 影视详情（包含演员、相似推荐、视频）
 app.MapGet("/api/movie/{id:int}", async (int id, string? type, IHttpClientFactory f, IDbCache cache) =>
 {
     var mediaType = type ?? "movie";
@@ -192,25 +192,100 @@ app.MapGet("/api/movie/{id:int}", async (int id, string? type, IHttpClientFactor
     if (cached != null) return Results.Content(cached, "application/json");
     
     var client = f.CreateClient("tmdb");
-    var tmdbResp = await client.GetAsync($"{mediaType}/{id}?api_key={tmdbApiKey}&language=zh-CN");
-    if (!tmdbResp.IsSuccessStatusCode) return Results.StatusCode(502);
-    var raw = await tmdbResp.Content.ReadAsStringAsync();
     
-    using var doc = JsonDocument.Parse(raw);
+    // 并行请求详情、演员、相似推荐、视频
+    var detailTask = client.GetAsync($"{mediaType}/{id}?api_key={tmdbApiKey}&language=zh-CN");
+    var creditsTask = client.GetAsync($"{mediaType}/{id}/credits?api_key={tmdbApiKey}&language=zh-CN");
+    var similarTask = client.GetAsync($"{mediaType}/{id}/similar?api_key={tmdbApiKey}&language=zh-CN&page=1");
+    var videosTask = client.GetAsync($"{mediaType}/{id}/videos?api_key={tmdbApiKey}&language=zh-CN");
+    
+    await Task.WhenAll(detailTask, creditsTask, similarTask, videosTask);
+    
+    if (!detailTask.Result.IsSuccessStatusCode) return Results.StatusCode(502);
+    
+    var detailRaw = await detailTask.Result.Content.ReadAsStringAsync();
+    using var doc = JsonDocument.Parse(detailRaw);
     var el = doc.RootElement;
-    var detail = new {
-        tmdbId = id,
-        title = el.TryGetProperty("title", out var t) ? t.GetString() : el.TryGetProperty("name", out var n) ? n.GetString() : "",
-        originalTitle = el.TryGetProperty("original_title", out var ot) ? ot.GetString() : el.TryGetProperty("original_name", out var on) ? on.GetString() : "",
-        overview = el.TryGetProperty("overview", out var ov) ? ov.GetString() : "",
-        posterPath = el.TryGetProperty("poster_path", out var pp) ? pp.GetString() : "",
-        backdropPath = el.TryGetProperty("backdrop_path", out var bp) ? bp.GetString() : "",
-        tmdbVoteAverage = el.TryGetProperty("vote_average", out var va) ? va.GetDouble() : 0,
-        tmdbVoteCount = el.TryGetProperty("vote_count", out var vc) ? vc.GetInt32() : 0,
-        mediaType = mediaType,
-        releaseDate = el.TryGetProperty("release_date", out var rd) ? rd.GetString() : el.TryGetProperty("first_air_date", out var fad) ? fad.GetString() : ""
+    
+    // 解析基本信息
+    var detail = new Dictionary<string, object?>
+    {
+        ["tmdbId"] = id,
+        ["title"] = el.TryGetProperty("title", out var t) ? t.GetString() : el.TryGetProperty("name", out var n) ? n.GetString() : "",
+        ["originalTitle"] = el.TryGetProperty("original_title", out var ot) ? ot.GetString() : el.TryGetProperty("original_name", out var on) ? on.GetString() : "",
+        ["overview"] = el.TryGetProperty("overview", out var ov) ? ov.GetString() : "",
+        ["posterPath"] = el.TryGetProperty("poster_path", out var pp) ? pp.GetString() : "",
+        ["backdropPath"] = el.TryGetProperty("backdrop_path", out var bp) ? bp.GetString() : "",
+        ["tmdbVoteAverage"] = el.TryGetProperty("vote_average", out var va) ? va.GetDouble() : 0,
+        ["tmdbVoteCount"] = el.TryGetProperty("vote_count", out var vc) ? vc.GetInt32() : 0,
+        ["mediaType"] = mediaType,
+        ["releaseDate"] = el.TryGetProperty("release_date", out var rd) ? rd.GetString() : el.TryGetProperty("first_air_date", out var fad) ? fad.GetString() : "",
+        ["runtime"] = el.TryGetProperty("runtime", out var rt) ? rt.GetInt32() : (int?)null,
+        ["originalLanguage"] = el.TryGetProperty("original_language", out var ol) ? ol.GetString() : "",
+        ["genres"] = el.TryGetProperty("genres", out var gen) ? string.Join(", ", gen.EnumerateArray().Select(g => g.GetProperty("name").GetString())) : "",
+        ["productionCountries"] = el.TryGetProperty("production_countries", out var pc) ? string.Join(", ", pc.EnumerateArray().Select(c => c.GetProperty("name").GetString())) : ""
     };
-    var response = ApiResponse(detail);
+    
+    // 解析演员信息
+    List<object>? cast = null;
+    if (creditsTask.Result.IsSuccessStatusCode)
+    {
+        var creditsRaw = await creditsTask.Result.Content.ReadAsStringAsync();
+        using var creditsDoc = JsonDocument.Parse(creditsRaw);
+        if (creditsDoc.RootElement.TryGetProperty("cast", out var castArray))
+        {
+            cast = castArray.EnumerateArray().Take(10).Select(c => new
+            {
+                id = c.GetProperty("id").GetInt32(),
+                name = c.GetProperty("name").GetString() ?? "",
+                character = c.TryGetProperty("character", out var ch) ? ch.GetString() : "",
+                profilePath = c.TryGetProperty("profile_path", out var pp) ? pp.GetString() : ""
+            }).Cast<object>().ToList();
+        }
+    }
+    
+    // 解析相似推荐
+    List<object>? similar = null;
+    if (similarTask.Result.IsSuccessStatusCode)
+    {
+        var similarRaw = await similarTask.Result.Content.ReadAsStringAsync();
+        using var similarDoc = JsonDocument.Parse(similarRaw);
+        if (similarDoc.RootElement.TryGetProperty("results", out var similarArray))
+        {
+            similar = similarArray.EnumerateArray().Take(12).Select(s => TmdbToDto(s, mediaType)).Cast<object>().ToList();
+        }
+    }
+    
+    // 解析视频
+    List<object>? videos = null;
+    if (videosTask.Result.IsSuccessStatusCode)
+    {
+        var videosRaw = await videosTask.Result.Content.ReadAsStringAsync();
+        using var videosDoc = JsonDocument.Parse(videosRaw);
+        if (videosDoc.RootElement.TryGetProperty("results", out var videosArray))
+        {
+            videos = videosArray.EnumerateArray()
+                .Where(v => v.TryGetProperty("site", out var site) && site.GetString() == "YouTube")
+                .Where(v => v.TryGetProperty("type", out var type2) && (type2.GetString() == "Trailer" || type2.GetString() == "Teaser"))
+                .Select(v => new
+                {
+                    key = v.GetProperty("key").GetString() ?? "",
+                    name = v.TryGetProperty("name", out var name) ? name.GetString() : "",
+                    type = v.GetProperty("type").GetString() ?? ""
+                }).Cast<object>().ToList();
+        }
+    }
+    
+    // 组装完整响应（扁平化）
+    var responseData = new Dictionary<string, object?>(detail)
+    {
+        ["credits"] = cast,
+        ["similar"] = similar,
+        ["videos"] = videos
+    };
+    
+    var response = ApiResponse(responseData);
+    
     await cache.Set(key, response, 86400); // 24h
     return Results.Content(response, "application/json");
 });

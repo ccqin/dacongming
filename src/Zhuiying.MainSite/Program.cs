@@ -12,9 +12,10 @@ builder.RootComponents.Add<HeadOutlet>("head::after");
 var hubUrl = builder.Configuration["HubUrl"] ?? "https://zhuiyinghub.19856789.xyz";
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(hubUrl) });
 
-// ע�����
+// 注册服务
 builder.Services.AddScoped<MovieService>();
 builder.Services.AddScoped<SearchService>();
+builder.Services.AddScoped<CacheService>();
 
 // MudBlazor
 builder.Services.AddMudServices(config =>

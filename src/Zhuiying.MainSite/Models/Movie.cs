@@ -16,10 +16,25 @@ public class Movie
     public string? OriginalLanguage { get; set; }
     public string? Genres { get; set; }
     public string? ProductionCountries { get; set; }
-    public string? Credits { get; set; }
-    public string? Similar { get; set; }
-    public string? Videos { get; set; }
+    public List<CastMember>? Credits { get; set; }
+    public List<Movie>? Similar { get; set; }
+    public List<VideoInfo>? Videos { get; set; }
     public DoubanInfo? Douban { get; set; }
+}
+
+public class CastMember
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public string? Character { get; set; }
+    public string? ProfilePath { get; set; }
+}
+
+public class VideoInfo
+{
+    public string Key { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Type { get; set; } = "";
 }
 
 public class DoubanInfo
@@ -43,4 +58,10 @@ public class MovieListResponse
 {
     public int Page { get; set; }
     public List<Movie> Results { get; set; } = new();
+}
+
+public class Genre
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
 }
