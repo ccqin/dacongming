@@ -16,6 +16,8 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(hubUrl) 
 builder.Services.AddScoped<MovieService>();
 builder.Services.AddScoped<SearchService>();
 builder.Services.AddScoped<CacheService>();
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<FavoritesService>();
 
 // MudBlazor
 builder.Services.AddMudServices(config =>

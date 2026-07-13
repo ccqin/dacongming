@@ -1,0 +1,93 @@
+<footer class="app-footer">
+    <div class="footer-content">
+        <div class="footer-section">
+            <div class="footer-logo">追影</div>
+            <p class="footer-desc">发现好电影，追踪精彩瞬间</p>
+        </div>
+        <div class="footer-section">
+            <h4>导航</h4>
+            <a href="/">首页</a>
+            <a href="/movies">电影</a>
+            <a href="/tv">电视剧</a>
+            <a href="/browse">筛选</a>
+        </div>
+        <div class="footer-section">
+            <h4>数据源</h4>
+            <a href="https://www.themoviedb.org/" target="_blank">TMDB</a>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        <p>&copy; @DateTime.Now.Year 追影 Zhuiying — 数据来自 TMDB</p>
+    </div>
+</footer>
+
+<style>
+    .app-footer {
+        margin-top: 4rem;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        background: rgba(10,10,10,0.95);
+        padding: 3rem 5% 1.5rem;
+    }
+
+    .footer-content {
+        display: flex;
+        gap: 4rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+
+    .footer-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .footer-logo {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--zhui-primary, #e50914);
+        letter-spacing: 2px;
+    }
+
+    .footer-desc {
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.9rem;
+        max-width: 250px;
+    }
+
+    .footer-section h4 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--zhui-text, #f8fafc);
+        margin-bottom: 0.25rem;
+    }
+
+    .footer-section a {
+        color: var(--zhui-muted, #94a3b8);
+        text-decoration: none;
+        font-size: 0.85rem;
+        transition: color 0.2s;
+    }
+
+    .footer-section a:hover {
+        color: var(--zhui-text, #f8fafc);
+    }
+
+    .footer-bottom {
+        border-top: 1px solid rgba(255,255,255,0.05);
+        padding-top: 1.5rem;
+        text-align: center;
+    }
+
+    .footer-bottom p {
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.8rem;
+    }
+
+    @@media (max-width: 768px) {
+        .footer-content {
+            flex-direction: column;
+            gap: 2rem;
+        }
+    }
+</style>

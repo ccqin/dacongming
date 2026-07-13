@@ -5,10 +5,8 @@ services:
     container_name: zhuiying-nginx
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
     restart: unless-stopped
     networks:
       - dacongming

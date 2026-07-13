@@ -13,7 +13,7 @@ services:
       - mainsite
       - zhuiyinghub
     networks:
-      - limitless
+      - dacongming
 
   zhuiyinghub:
     build:
@@ -27,11 +27,13 @@ services:
     environment:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - ASPNETCORE_URLS=http://0.0.0.0:5002
+      - ADMIN_USER=${ADMIN_USER}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
     volumes:
       - tmdb_data:/app/data
     restart: unless-stopped
     networks:
-      - limitless
+      - dacongming
 
   mainsite:
     build:
@@ -44,7 +46,7 @@ services:
       - HUB_URL=${HUB_URL}
     restart: unless-stopped
     networks:
-      - limitless
+      - dacongming
 
   tgbot:
     build:
@@ -60,11 +62,11 @@ services:
     depends_on:
       - mainsite
     networks:
-      - limitless
+      - dacongming
 
 volumes:
   tmdb_data:
 
 networks:
-  limitless:
+  dacongming:
     external: true

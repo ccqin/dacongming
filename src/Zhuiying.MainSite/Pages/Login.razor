@@ -1,0 +1,173 @@
+@page "/login"
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>登录 - 追影</PageTitle>
+
+<div class="auth-page">
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>登录</h1>
+            <p>欢迎回来</p>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="error-message">@errorMessage</div>
+        }
+
+        <div class="auth-form">
+            <div class="form-group">
+                <label>用户名</label>
+                <MudTextField @bind-Value="username" Placeholder="输入用户名" Variant="Variant.Outlined" Immediate="true" />
+            </div>
+
+            <div class="form-group">
+                <label>密码</label>
+                <MudTextField @bind-Value="password" Placeholder="输入密码" Variant="Variant.Outlined" InputType="InputType.Password" Immediate="true" />
+            </div>
+
+            <MudButton
+                Variant="Variant.Filled"
+                Color="Color.Primary"
+                Size="Size.Large"
+                FullWidth="true"
+                Disabled="@isLoading"
+                OnClick="HandleLogin">
+                @(isLoading ? "登录中..." : "登录")
+            </MudButton>
+        </div>
+
+        <div class="auth-footer">
+            <span>还没有账号？</span>
+            <a href="/register">立即注册</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string username = "";
+    private string password = "";
+    private string errorMessage = "";
+    private bool isLoading = false;
+
+    private async Task HandleLogin()
+    {
+        Console.WriteLine($"[Login] HandleLogin called, username={username}, password length={password?.Length ?? 0}");
+
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+        {
+            errorMessage = "请填写用户名和密码";
+            Console.WriteLine($"[Login] Validation failed");
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = "";
+        StateHasChanged();
+
+        try
+        {
+            var result = await AuthService.LoginAsync(username, password);
+            if (result.Success)
+            {
+                Navigation.NavigateTo("/", forceLoad: true);
+            }
+            else
+            {
+                errorMessage = result.Error ?? "登录失败";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"登录失败: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}
+
+<style>
+    .auth-page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 80px 5% 40px;
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+    }
+
+    .auth-container {
+        width: 100%;
+        max-width: 420px;
+        background: var(--zhui-surface, #141414);
+        border-radius: 12px;
+        padding: 2.5rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+
+    .auth-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .auth-header h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: var(--zhui-text, #f8fafc);
+        margin-bottom: 0.5rem;
+    }
+
+    .auth-header p {
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.95rem;
+    }
+
+    .error-message {
+        background: rgba(229, 9, 20, 0.15);
+        border: 1px solid rgba(229, 9, 20, 0.3);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        color: #f87171;
+        font-size: 0.9rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .auth-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .form-group label {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--zhui-text, #f8fafc);
+    }
+
+    .auth-footer {
+        text-align: center;
+        margin-top: 1.5rem;
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.9rem;
+    }
+
+    .auth-footer a {
+        color: var(--zhui-primary, #e50914);
+        text-decoration: none;
+        font-weight: 600;
+        margin-left: 0.25rem;
+    }
+
+    .auth-footer a:hover {
+        text-decoration: underline;
+    }
+</style>

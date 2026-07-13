@@ -87,6 +87,59 @@ public class CacheService
         }
     }
 
+    public async Task SetRawAsync(string key, string value, TimeSpan? expiry = null)
+    {
+        try
+        {
+            Console.WriteLine($"[Cache] SetRawAsync: key={key}, value length={value?.Length ?? 0}");
+            var expiryTimestamp = DateTime.UtcNow.Add(expiry ?? _defaultExpiry).Ticks;
+            var json = JsonSerializer.Serialize(new { value, expiry = expiryTimestamp });
+            Console.WriteLine($"[Cache] SetRawAsync JSON: {json.Substring(0, Math.Min(100, json.Length))}...");
+            await _jsRuntime.InvokeVoidAsync("localStorage.setItem", key, json);
+            Console.WriteLine($"[Cache] SetRawAsync: saved to localStorage");
+        }
+        catch (Exception ex) { Console.WriteLine($"[Cache] SetRawAsync error: {ex.Message}"); }
+    }
+
+    public async Task<string?> GetRawAsync(string key)
+    {
+        try
+        {
+            Console.WriteLine($"[Cache] GetRawAsync: key={key}");
+            var cached = await _jsRuntime.InvokeAsync<string?>("localStorage.getItem", key);
+            Console.WriteLine($"[Cache] GetRawAsync: raw value length={cached?.Length ?? 0}");
+            if (string.IsNullOrEmpty(cached)) return null;
+
+            var entry = JsonSerializer.Deserialize<RawEntry>(cached);
+            if (entry == null) return null;
+
+            Console.WriteLine($"[Cache] GetRawAsync: expiry={entry.Expiry}, now={DateTime.UtcNow.Ticks}, expired={DateTime.UtcNow.Ticks > entry.Expiry}");
+
+            if (DateTime.UtcNow.Ticks > entry.Expiry)
+            {
+                await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", key);
+                return null;
+            }
+            Console.WriteLine($"[Cache] GetRawAsync: returning value length={entry.Value?.Length ?? 0}");
+            return entry.Value;
+        }
+        catch (Exception ex) { Console.WriteLine($"[Cache] GetRawAsync error: {ex.Message}"); return null; }
+    }
+
+    public async Task RemoveRawAsync(string key)
+    {
+        try { await _jsRuntime.InvokeVoidAsync("localStorage.removeItem", key); } catch { }
+    }
+
+    private class RawEntry
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public string? Value { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("expiry")]
+        public long Expiry { get; set; }
+    }
+
     private class CacheEntry<T>
     {
         public T? Data { get; set; }

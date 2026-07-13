@@ -1,0 +1,164 @@
+@page "/tv"
+@inject MovieService MovieService
+@inject NavigationManager Navigation
+
+<PageTitle>热门电视剧 - 追影</PageTitle>
+
+<div class="category-page">
+    <div class="page-header">
+        <h1>📺 热门电视剧</h1>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="skeleton-grid">
+            @for (int i = 0; i < 12; i++)
+            {
+                <div class="skeleton-card">
+                    <div class="skeleton-poster shimmer"></div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="movie-grid">
+            @foreach (var tv in tvs)
+            {
+                <MovieCard Movie="tv" OnClick="() => GoToDetail(tv.TmdbId)" />
+            }
+        </div>
+
+        @if (hasMore)
+        {
+            <div class="load-more">
+                <button class="load-more-btn" @onclick="LoadMore" disabled="@isLoadingMore">
+                    @(isLoadingMore ? "加载中..." : "加载更多")
+                </button>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<Movie> tvs = new();
+    private bool isLoading = true;
+    private bool isLoadingMore = false;
+    private bool hasMore = true;
+    private int currentPage = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadTvs();
+    }
+
+    private async Task LoadTvs()
+    {
+        isLoading = true;
+        try
+        {
+            tvs = await MovieService.GetTrendingMoviesAsync(type: "tv", page: 1);
+            currentPage = 1;
+            hasMore = tvs.Count >= 20;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载电视剧失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadMore()
+    {
+        isLoadingMore = true;
+        try
+        {
+            currentPage++;
+            var moreTvs = await MovieService.GetTrendingMoviesAsync(type: "tv", page: currentPage);
+            tvs.AddRange(moreTvs);
+            hasMore = moreTvs.Count >= 20;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载更多失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoadingMore = false;
+        }
+    }
+
+    private void GoToDetail(int id)
+    {
+        Navigation.NavigateTo($"/movie/tv/{id}");
+    }
+}
+
+<style>
+    .category-page {
+        padding: 80px 5% 40px;
+    }
+
+    .page-header h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 1.5rem;
+    }
+
+    .skeleton-grid, .movie-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .skeleton-card {
+        aspect-ratio: 2/3;
+        border-radius: 8px;
+        background: var(--zhui-card, #1a1a2e);
+    }
+
+    .skeleton-poster {
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+    }
+
+    .shimmer {
+        animation: shimmer 1.5s infinite;
+    }
+
+    @@keyframes shimmer {
+        0% { opacity: 0.5; }
+        50% { opacity: 0.8; }
+        100% { opacity: 0.5; }
+    }
+
+    .load-more {
+        text-align: center;
+        margin-top: 2rem;
+    }
+
+    .load-more-btn {
+        padding: 0.75rem 2rem;
+        background: var(--zhui-primary, #e50914);
+        border: none;
+        border-radius: 6px;
+        color: white;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.2s;
+    }
+
+    .load-more-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+    }
+
+    .load-more-btn:hover:not(:disabled) {
+        opacity: 0.9;
+    }
+</style>

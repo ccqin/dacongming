@@ -1,21 +1,26 @@
 @using Microsoft.AspNetCore.Components.Web
 @inject NavigationManager Navigation
+@inject AuthService AuthService
 
 <header class="app-header">
     <div class="header-content">
         <div class="logo-section">
             <a href="/" class="logo">追影</a>
         </div>
-        
+
         <nav class="nav-links">
             <a href="/" class="nav-link">首页</a>
             <a href="/movies" class="nav-link">电影</a>
             <a href="/tv" class="nav-link">电视剧</a>
             <a href="/browse" class="nav-link">筛选</a>
+            @if (currentUser != null)
+            {
+                <a href="/favorites" class="nav-link">收藏</a>
+            }
         </nav>
-        
+
         <div class="search-section">
-            <MudTextField 
+            <MudTextField
                 @bind-Value="SearchText"
                 Placeholder="搜索影视..."
                 Variant="Variant.Outlined"
@@ -26,18 +31,76 @@
                 Style="background: rgba(255,255,255,0.1); border-radius: 4px;"
                 @onkeyup="HandleSearch" />
         </div>
+
+        <div class="user-section">
+            @if (currentUser != null)
+            {
+                <div class="user-menu-wrapper">
+                    <button class="user-button" @onclick="ToggleUserMenu">
+                        <MudIcon Icon="@Icons.Material.Filled.AccountCircle" Size="Size.Medium" />
+                        <span>@currentUser.Username</span>
+                    </button>
+                    @if (showUserMenu)
+                    {
+                        <div class="user-dropdown">
+                            @if (currentUser.Role == "admin")
+                            {
+                                <a href="/admin" class="dropdown-item">
+                                    <MudIcon Icon="@Icons.Material.Filled.Settings" Size="Size.Small" /> 管理后台
+                                </a>
+                            }
+                            <button class="dropdown-item logout-btn" @onclick="HandleLogout">
+                                <MudIcon Icon="@Icons.Material.Filled.Logout" Size="Size.Small" /> 退出登录
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="auth-links">
+                    <a href="/login" class="auth-link">登录</a>
+                    <a href="/register" class="auth-link primary">注册</a>
+                </div>
+            }
+        </div>
     </div>
 </header>
 
 @code {
     private string SearchText { get; set; } = "";
-    
+    private AuthResult? currentUser;
+    private bool showUserMenu = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        currentUser = await AuthService.GetCurrentUserAsync();
+    }
+
     private void HandleSearch(KeyboardEventArgs e)
     {
         if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(SearchText))
         {
-            Navigation.NavigateTo($"/search?keyword={Uri.EscapeDataString(SearchText)}");
+            Navigation.NavigateTo($"/search/{Uri.EscapeDataString(SearchText)}");
         }
+    }
+
+    private void ToggleUserMenu()
+    {
+        showUserMenu = !showUserMenu;
+    }
+
+    private async Task HandleLogout()
+    {
+        await AuthService.LogoutAsync();
+        currentUser = null;
+        showUserMenu = false;
+        Navigation.NavigateTo("/", forceLoad: true);
+    }
+
+    private void CloseUserMenu()
+    {
+        showUserMenu = false;
     }
 }
 
@@ -52,7 +115,7 @@
         padding: 1rem 0;
         transition: background 0.3s;
     }
-    
+
     .header-content {
         display: flex;
         align-items: center;
@@ -60,11 +123,11 @@
         padding: 0 5%;
         max-width: 100%;
     }
-    
+
     .logo-section {
         flex-shrink: 0;
     }
-    
+
     .logo {
         font-size: 1.8rem;
         font-weight: 800;
@@ -72,13 +135,13 @@
         text-decoration: none;
         letter-spacing: 2px;
     }
-    
+
     .nav-links {
         display: flex;
         gap: 1.5rem;
         flex: 1;
     }
-    
+
     .nav-link {
         color: var(--zhui-text);
         text-decoration: none;
@@ -86,33 +149,131 @@
         font-weight: 500;
         transition: color 0.2s;
     }
-    
+
     .nav-link:hover {
         color: var(--zhui-primary);
     }
-    
+
     .search-section {
-        flex: 0 0 300px;
+        flex: 0 0 260px;
     }
-    
+
     .search-input {
         width: 100%;
     }
-    
+
+    .user-section {
+        flex-shrink: 0;
+    }
+
+    .auth-links {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+    }
+
+    .auth-link {
+        color: var(--zhui-text);
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: color 0.2s;
+    }
+
+    .auth-link:hover {
+        color: var(--zhui-primary);
+    }
+
+    .auth-link.primary {
+        background: var(--zhui-primary);
+        color: white;
+        padding: 0.4rem 1rem;
+        border-radius: 4px;
+    }
+
+    .auth-link.primary:hover {
+        opacity: 0.9;
+        color: white;
+    }
+
+    .user-menu-wrapper {
+        position: relative;
+    }
+
+    .user-button {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: none;
+        border: none;
+        color: var(--zhui-text);
+        cursor: pointer;
+        font-size: 0.9rem;
+        padding: 0.4rem 0.75rem;
+        border-radius: 6px;
+        transition: background 0.2s;
+    }
+
+    .user-button:hover {
+        background: rgba(255,255,255,0.1);
+    }
+
+    .user-dropdown {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 0.5rem;
+        background: var(--zhui-surface, #141414);
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        min-width: 160px;
+        overflow: hidden;
+        z-index: 200;
+    }
+
+    .dropdown-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 1rem;
+        color: var(--zhui-text);
+        text-decoration: none;
+        font-size: 0.9rem;
+        cursor: pointer;
+        background: none;
+        border: none;
+        width: 100%;
+        transition: background 0.2s;
+    }
+
+    .dropdown-item:hover {
+        background: rgba(255,255,255,0.05);
+    }
+
+    .logout-btn {
+        color: #f87171;
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
     @@media (max-width: 768px) {
         .header-content {
             flex-wrap: wrap;
             gap: 1rem;
         }
-        
+
         .nav-links {
             order: 3;
             width: 100%;
             justify-content: center;
         }
-        
+
         .search-section {
             flex: 1;
+            order: 2;
+        }
+
+        .user-section {
+            order: 1;
         }
     }
 </style>

@@ -1,5 +1,5 @@
 ARG TARGET
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.300 AS build
 ARG TARGET
 WORKDIR /src
 COPY ["src/Zhuiying.${TARGET}/Zhuiying.${TARGET}.csproj", "src/Zhuiying.${TARGET}/"]

@@ -1,0 +1,414 @@
+@page "/favorites"
+@inject FavoritesService FavoritesService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>我的收藏 - 追影</PageTitle>
+
+<div class="favorites-page">
+    @if (!isAuthenticated)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🔐</div>
+            <h2>请先登录</h2>
+            <p>登录后即可查看和管理你的收藏</p>
+            <a href="/login" class="primary-btn">去登录</a>
+        </div>
+    }
+    else if (isLoading)
+    {
+        <div class="skeleton-grid">
+            @for (int i = 0; i < 8; i++)
+            {
+                <div class="skeleton-card">
+                    <div class="skeleton-poster shimmer"></div>
+                </div>
+            }
+        </div>
+    }
+    else if (favorites.Count == 0)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">⭐</div>
+            <h2>还没有收藏</h2>
+            <p>浏览影视时点击收藏按钮，即可添加到此处</p>
+            <a href="/browse" class="primary-btn">去浏览</a>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <h1>⭐ 我的收藏</h1>
+            <span class="count">共 @favorites.Count 部</span>
+        </div>
+
+        <div class="favorites-grid">
+            @foreach (var fav in favorites)
+            {
+                <div class="favorite-card">
+                    <div class="poster-wrapper">
+                        <img src="@GetPosterUrl(fav.PosterPath)" alt="@fav.Title" loading="lazy" />
+                        @if (fav.LinkCount > 0)
+                        {
+                            <span class="link-badge">@fav.LinkCount 个链接</span>
+                        }
+                    </div>
+                    <div class="card-info">
+                        <div class="card-title">@fav.Title</div>
+                        <div class="card-meta">
+                            <span class="media-type">@(fav.MediaType == "movie" ? "电影" : "剧集")</span>
+                            <span class="add-date">@DateTime.Parse(fav.AddedAt).ToString("MM-dd")</span>
+                        </div>
+                    </div>
+                    <div class="card-actions">
+                        <button class="action-btn search-btn" @onclick="() => SearchLinks(fav.Id)" disabled="@isSearching">
+                            🔍 搜索链接
+                        </button>
+                        <button class="action-btn remove-btn" @onclick="() => RemoveFavorite(fav.TmdbId, fav.MediaType)">
+                            ❌ 取消收藏
+                        </button>
+                    </div>
+                    @if (showLinks.ContainsKey(fav.Id) && showLinks[fav.Id].Count > 0)
+                    {
+                        <div class="links-panel">
+                            <h4>找到的链接</h4>
+                            @foreach (var link in showLinks[fav.Id])
+                            {
+                                <div class="link-item">
+                                    <span class="cloud-type">@link.CloudType</span>
+                                    <a href="@link.Url" target="_blank" class="link-url">@link.Title</a>
+                                    @if (!string.IsNullOrEmpty(link.Password))
+                                    {
+                                        <span class="link-password">密码: @link.Password</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<FavoriteItem> favorites = new();
+    private Dictionary<int, List<FavoriteLink>> showLinks = new();
+    private bool isLoading = true;
+    private bool isSearching = false;
+    private bool isAuthenticated = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        isAuthenticated = await AuthService.IsAuthenticatedAsync();
+        if (isAuthenticated)
+        {
+            await LoadFavorites();
+        }
+        else
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadFavorites()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            favorites = await FavoritesService.GetFavoritesAsync();
+            Console.WriteLine($"加载收藏完成，共 {favorites.Count} 部");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载收藏失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SearchLinks(int favoriteId)
+    {
+        isSearching = true;
+        StateHasChanged();
+
+        try
+        {
+            await FavoritesService.SearchLinksAsync(favoriteId);
+            var links = await FavoritesService.GetFavoriteLinksAsync(favoriteId);
+            showLinks[favoriteId] = links;
+            await LoadFavorites(); // 刷新列表
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"搜索链接失败: {ex.Message}");
+        }
+        finally
+        {
+            isSearching = false;
+        }
+    }
+
+    private async Task RemoveFavorite(int tmdbId, string mediaType)
+    {
+        try
+        {
+            await FavoritesService.RemoveFavoriteAsync(tmdbId, mediaType);
+            showLinks.Remove(tmdbId);
+            await LoadFavorites();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"取消收藏失败: {ex.Message}");
+        }
+    }
+
+    private string GetPosterUrl(string? posterPath)
+    {
+        if (string.IsNullOrEmpty(posterPath))
+            return "/images/placeholder-poster.svg";
+        return $"https://image.tmdb.org/t/p/w342{posterPath}";
+    }
+}
+
+<style>
+    .favorites-page {
+        padding: 80px 5% 40px;
+        min-height: 100vh;
+    }
+
+    .page-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 2rem;
+    }
+
+    .page-header h1 {
+        font-size: 2rem;
+        font-weight: 700;
+    }
+
+    .count {
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 1rem;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 4rem 2rem;
+    }
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 1rem;
+    }
+
+    .empty-state h2 {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: var(--zhui-muted, #94a3b8);
+        margin-bottom: 1.5rem;
+    }
+
+    .primary-btn {
+        display: inline-block;
+        padding: 0.75rem 1.5rem;
+        background: var(--zhui-primary, #e50914);
+        color: white;
+        text-decoration: none;
+        border-radius: 6px;
+        font-weight: 600;
+    }
+
+    .skeleton-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .skeleton-card {
+        aspect-ratio: 2/3;
+        border-radius: 8px;
+        background: var(--zhui-card, #1a1a2e);
+    }
+
+    .skeleton-poster {
+        width: 100%;
+        height: 100%;
+        border-radius: 8px;
+    }
+
+    .shimmer {
+        animation: shimmer 1.5s infinite;
+    }
+
+    @@keyframes shimmer {
+        0% { opacity: 0.5; }
+        50% { opacity: 0.8; }
+        100% { opacity: 0.5; }
+    }
+
+    .favorites-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 1.5rem;
+    }
+
+    .favorite-card {
+        background: var(--zhui-surface, #141414);
+        border-radius: 12px;
+        overflow: hidden;
+        transition: transform 0.3s;
+    }
+
+    .favorite-card:hover {
+        transform: translateY(-4px);
+    }
+
+    .poster-wrapper {
+        position: relative;
+        aspect-ratio: 2/3;
+    }
+
+    .poster-wrapper img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .link-badge {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: var(--zhui-primary, #e50914);
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .card-info {
+        padding: 1rem;
+    }
+
+    .card-title {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .card-meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85rem;
+        color: var(--zhui-muted, #94a3b8);
+    }
+
+    .media-type {
+        background: rgba(255,255,255,0.1);
+        padding: 0.2rem 0.5rem;
+        border-radius: 4px;
+    }
+
+    .card-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0 1rem 1rem;
+    }
+
+    .action-btn {
+        flex: 1;
+        padding: 0.5rem;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: opacity 0.2s;
+    }
+
+    .action-btn:hover {
+        opacity: 0.8;
+    }
+
+    .search-btn {
+        background: var(--zhui-primary, #e50914);
+        color: white;
+    }
+
+    .remove-btn {
+        background: rgba(255,255,255,0.1);
+        color: var(--zhui-text, #f8fafc);
+    }
+
+    .links-panel {
+        padding: 1rem;
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .links-panel h4 {
+        font-size: 0.9rem;
+        margin-bottom: 0.75rem;
+        color: var(--zhui-text, #f8fafc);
+    }
+
+    .link-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 0;
+        font-size: 0.85rem;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .cloud-type {
+        background: rgba(56, 189, 248, 0.2);
+        color: #38bdf8;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        flex-shrink: 0;
+    }
+
+    .link-url {
+        flex: 1;
+        color: var(--zhui-text, #f8fafc);
+        text-decoration: none;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .link-url:hover {
+        text-decoration: underline;
+    }
+
+    .link-password {
+        color: #fbbf24;
+        font-size: 0.75rem;
+        flex-shrink: 0;
+    }
+
+    @@media (max-width: 768px) {
+        .favorites-page {
+            padding: 80px 4% 40px;
+        }
+
+        .favorites-grid {
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        }
+    }
+</style>

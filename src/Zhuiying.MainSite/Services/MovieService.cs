@@ -81,7 +81,36 @@ public class MovieService
     {
         if (string.IsNullOrEmpty(backdropPath))
             return "/images/placeholder-backdrop.svg";
-        
+
         return $"{ImageBaseUrl}{size}{backdropPath}";
+    }
+
+    public async Task<(List<Movie> Movies, int TotalPages)> DiscoverMoviesAsync(
+        string type = "movie", int? genreId = null, int? year = null,
+        double? minRating = null, int page = 1)
+    {
+        var url = $"/api/movie/discover?type={type}&page={page}";
+        if (genreId.HasValue) url += $"&genreId={genreId.Value}";
+        if (year.HasValue) url += $"&year={year.Value}";
+        if (minRating.HasValue) url += $"&minRating={minRating.Value}";
+
+        var response = await _http.GetFromJsonAsync<DiscoverResponse>(url);
+        if (response?.Success == true && response.Data != null)
+            return (response.Data, response.TotalPages);
+        return (new List<Movie>(), 0);
+    }
+
+    public async Task<List<Genre>> GetGenresAsync(string type = "movie")
+    {
+        var cacheKey = $"genres_{type}";
+        var cached = await _cache.GetAsync<List<Genre>>(cacheKey);
+        if (cached != null) return cached;
+
+        var response = await _http.GetFromJsonAsync<ApiResponse<List<Genre>>>($"/api/movie/genres?type={type}");
+        var result = response?.Success == true ? response.Data ?? new List<Genre>() : new List<Genre>();
+
+        if (result.Any())
+            await _cache.SetAsync(cacheKey, result);
+        return result;
     }
 }

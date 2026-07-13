@@ -1,5 +1,7 @@
 @page "/movie/{MediaType}/{TmdbId:int}"
 @inject MovieService MovieService
+@inject FavoritesService FavoritesService
+@inject AuthService AuthService
 @inject NavigationManager Navigation
 
 <PageTitle>@(movie?.Title ?? "加载中...") - 追影</PageTitle>
@@ -67,9 +69,31 @@
                 }
 
                 <div class="actions">
-                    <MudButton 
-                        Variant="Variant.Filled" 
-                        Color="Color.Primary" 
+                    @if (isFavorite)
+                    {
+                        <MudButton
+                            Variant="Variant.Filled"
+                            Color="Color.Primary"
+                            Size="Size.Large"
+                            StartIcon="@Icons.Material.Filled.Favorite"
+                            OnClick="ToggleFavorite">
+                            已收藏
+                        </MudButton>
+                    }
+                    else
+                    {
+                        <MudButton
+                            Variant="Variant.Outlined"
+                            Color="Color.Primary"
+                            Size="Size.Large"
+                            StartIcon="@Icons.Material.Filled.FavoriteBorder"
+                            OnClick="ToggleFavorite">
+                            收藏
+                        </MudButton>
+                    }
+                    <MudButton
+                        Variant="Variant.Filled"
+                        Color="Color.Primary"
                         Size="Size.Large"
                         Href="@(movie.MediaType == "movie" ? $"https://www.themoviedb.org/movie/{movie.TmdbId}" : $"https://www.themoviedb.org/tv/{movie.TmdbId}")"
                         Target="_blank">
@@ -161,9 +185,10 @@
 @code {
     [Parameter] public string MediaType { get; set; } = "movie";
     [Parameter] public int TmdbId { get; set; }
-    
+
     private Movie? movie;
     private bool isLoading = true;
+    private bool isFavorite = false;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -171,6 +196,8 @@
         try
         {
             movie = await MovieService.GetMovieDetailsAsync(TmdbId, MediaType);
+            // 检查是否已收藏
+            isFavorite = await FavoritesService.IsFavoriteAsync(TmdbId, MediaType);
         }
         catch (Exception ex)
         {
@@ -180,6 +207,21 @@
         {
             isLoading = false;
         }
+    }
+
+    private async Task ToggleFavorite()
+    {
+        if (isFavorite)
+        {
+            await FavoritesService.RemoveFavoriteAsync(TmdbId, MediaType);
+            isFavorite = false;
+        }
+        else
+        {
+            await FavoritesService.AddFavoriteAsync(TmdbId, MediaType, movie?.Title, movie?.PosterPath);
+            isFavorite = true;
+        }
+        StateHasChanged();
     }
 
     private void NavigateToDetail(int tmdbId, string mediaType)

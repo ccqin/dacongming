@@ -65,3 +65,12 @@ public class Genre
     public int Id { get; set; }
     public string Name { get; set; } = "";
 }
+
+public class DiscoverResponse
+{
+    public bool Success { get; set; }
+    public List<Movie>? Data { get; set; }
+    public int Page { get; set; }
+    public int TotalPages { get; set; }
+    public string? Error { get; set; }
+}

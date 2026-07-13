@@ -1,0 +1,192 @@
+@page "/register"
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>注册 - 追影</PageTitle>
+
+<div class="auth-page">
+    <div class="auth-container">
+        <div class="auth-header">
+            <h1>注册</h1>
+            <p>创建新账号</p>
+        </div>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="error-message">@errorMessage</div>
+        }
+
+        <div class="auth-form">
+            <div class="form-group">
+                <label>用户名</label>
+                <MudTextField @bind-Value="username" Placeholder="至少3个字符" Variant="Variant.Outlined" Immediate="true" />
+            </div>
+
+            <div class="form-group">
+                <label>邮箱（可选）</label>
+                <MudTextField @bind-Value="email" Placeholder="your@email.com" Variant="Variant.Outlined" Immediate="true" InputType="InputType.Email" />
+            </div>
+
+            <div class="form-group">
+                <label>密码</label>
+                <MudTextField @bind-Value="password" Placeholder="至少6个字符" Variant="Variant.Outlined" InputType="InputType.Password" Immediate="true" />
+            </div>
+
+            <div class="form-group">
+                <label>确认密码</label>
+                <MudTextField @bind-Value="confirmPassword" Placeholder="再次输入密码" Variant="Variant.Outlined" InputType="InputType.Password" Immediate="true" />
+            </div>
+
+            <MudButton
+                Variant="Variant.Filled"
+                Color="Color.Primary"
+                Size="Size.Large"
+                FullWidth="true"
+                Disabled="@isLoading"
+                OnClick="HandleRegister">
+                @(isLoading ? "注册中..." : "注册")
+            </MudButton>
+        </div>
+
+        <div class="auth-footer">
+            <span>已有账号？</span>
+            <a href="/login">立即登录</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string username = "";
+    private string email = "";
+    private string password = "";
+    private string confirmPassword = "";
+    private string errorMessage = "";
+    private bool isLoading = false;
+
+    private async Task HandleRegister()
+    {
+        if (string.IsNullOrWhiteSpace(username) || username.Length < 3)
+        {
+            errorMessage = "用户名至少3个字符";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 6)
+        {
+            errorMessage = "密码至少6个字符";
+            return;
+        }
+        if (password != confirmPassword)
+        {
+            errorMessage = "两次输入的密码不一致";
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = "";
+        StateHasChanged();
+
+        try
+        {
+            var result = await AuthService.RegisterAsync(username, password, string.IsNullOrWhiteSpace(email) ? null : email);
+            if (result.Success)
+            {
+                Navigation.NavigateTo("/", forceLoad: true);
+            }
+            else
+            {
+                errorMessage = result.Error ?? "注册失败";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"注册失败: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+}
+
+<style>
+    .auth-page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 80px 5% 40px;
+        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+    }
+
+    .auth-container {
+        width: 100%;
+        max-width: 420px;
+        background: var(--zhui-surface, #141414);
+        border-radius: 12px;
+        padding: 2.5rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+
+    .auth-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+
+    .auth-header h1 {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: var(--zhui-text, #f8fafc);
+        margin-bottom: 0.5rem;
+    }
+
+    .auth-header p {
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.95rem;
+    }
+
+    .error-message {
+        background: rgba(229, 9, 20, 0.15);
+        border: 1px solid rgba(229, 9, 20, 0.3);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        color: #f87171;
+        font-size: 0.9rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .auth-form {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .form-group label {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--zhui-text, #f8fafc);
+    }
+
+    .auth-footer {
+        text-align: center;
+        margin-top: 1.5rem;
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.9rem;
+    }
+
+    .auth-footer a {
+        color: var(--zhui-primary, #e50914);
+        text-decoration: none;
+        font-weight: 600;
+        margin-left: 0.25rem;
+    }
+
+    .auth-footer a:hover {
+        text-decoration: underline;
+    }
+</style>

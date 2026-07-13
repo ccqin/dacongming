@@ -2,6 +2,13 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +18,30 @@ var tmdbApiKey = builder.Configuration["Tmdb:ApiKey"]
     ?? throw new InvalidOperationException("Environment variable 'TMDB_API_KEY' is missing.");
 var dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "tmdb_cache.db");
 Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+
+// JWT 配置
+var jwtKey = Environment.GetEnvironmentVariable("JWT_SECRET") ?? "zhuiying-dev-secret-key-change-in-production-2026";
+var jwtIssuer = "zhuiying-hub";
+var jwtAudience = "zhuiying-main-site";
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+        };
+    });
+builder.Services.AddAuthorization();
+
+// 注册后台搜索服务
+builder.Services.AddHostedService<FavoriteSearchWorker>();
 
 // ====== 数据库初始化 ======
 await using (var conn = new SqliteConnection($"Data Source={dbPath}"))
@@ -24,12 +55,64 @@ await using (var conn = new SqliteConnection($"Data Source={dbPath}"))
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             expires_at DATETIME NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_expires_at ON tmdb_cache(expires_at);";
+        CREATE INDEX IF NOT EXISTS idx_expires_at ON tmdb_cache(expires_at);
+
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            role TEXT DEFAULT 'user',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_username ON users(username);
+
+        CREATE TABLE IF NOT EXISTS favorites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tmdb_id INTEGER NOT NULL,
+            media_type TEXT NOT NULL DEFAULT 'movie',
+            title TEXT,
+            poster_path TEXT,
+            added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE(user_id, tmdb_id, media_type)
+        );
+        CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id);
+
+        CREATE TABLE IF NOT EXISTS search_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            favorite_id INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            cloud_type TEXT,
+            title TEXT,
+            url TEXT,
+            password TEXT,
+            found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (favorite_id) REFERENCES favorites(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_search_results_favorite ON search_results(favorite_id);";
     await cmd.ExecuteNonQueryAsync();
-    // 修复旧数据：如果旧表没有 expires_at，这里会失败，但既然重建了缓存机制，可以直接忽略或清理
-    // 为安全起见，强制删除旧表重建（因为旧缓存没有 TTL，数据已过时）
-    cmd.CommandText = "DELETE FROM tmdb_cache"; 
+    cmd.CommandText = "DELETE FROM tmdb_cache";
     await cmd.ExecuteNonQueryAsync();
+
+    // 创建默认管理员账户
+    var adminUser = Environment.GetEnvironmentVariable("ADMIN_USER") ?? "admin";
+    var adminPass = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "admin123";
+    cmd.CommandText = "SELECT COUNT(*) FROM users WHERE username = @username";
+    cmd.Parameters.AddWithValue("@username", adminUser);
+    var adminExists = Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0;
+    if (!adminExists)
+    {
+        var salt = GenerateSalt();
+        cmd.CommandText = "INSERT INTO users (username, password_hash, salt, role) VALUES (@username, @hash, @salt, 'admin')";
+        cmd.Parameters.Clear();
+        cmd.Parameters.AddWithValue("@username", adminUser);
+        cmd.Parameters.AddWithValue("@hash", HashPassword(adminPass, salt));
+        cmd.Parameters.AddWithValue("@salt", salt);
+        await cmd.ExecuteNonQueryAsync();
+    }
 }
 
 // ====== 服务注册 ======
@@ -41,9 +124,257 @@ builder.Services.AddSingleton<HubService>();
 
 var app = builder.Build();
 app.UseCors(c => c.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+app.UseAuthentication();
+app.UseAuthorization();
 
 var cache = app.Services.GetRequiredService<IDbCache>();
 var hub = app.Services.GetRequiredService<HubService>();
+
+// ====== 🔐 认证模块 (/api/auth) ======
+
+app.MapPost("/api/auth/register", async (RegisterRequest req, IDbCache cache) =>
+{
+    if (string.IsNullOrWhiteSpace(req.Username) || req.Username.Length < 3)
+        return Results.BadRequest(new { success = false, error = "用户名至少3个字符" });
+    if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6)
+        return Results.BadRequest(new { success = false, error = "密码至少6个字符" });
+
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    // 检查用户名是否已存在
+    cmd.CommandText = "SELECT COUNT(*) FROM users WHERE username = @username";
+    cmd.Parameters.AddWithValue("@username", req.Username);
+    if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) > 0)
+        return Results.BadRequest(new { success = false, error = "用户名已存在" });
+
+    // 创建用户
+    var salt = GenerateSalt();
+    cmd.CommandText = "INSERT INTO users (username, email, password_hash, salt) VALUES (@username, @email, @hash, @salt); SELECT last_insert_rowid();";
+    cmd.Parameters.Clear();
+    cmd.Parameters.AddWithValue("@username", req.Username);
+    cmd.Parameters.AddWithValue("@email", req.Email ?? "");
+    cmd.Parameters.AddWithValue("@hash", HashPassword(req.Password, salt));
+    cmd.Parameters.AddWithValue("@salt", salt);
+    var userId = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+    var token = GenerateJwtToken(req.Username, userId, "user");
+    return Results.Ok(new { success = true, data = new { userId, username = req.Username, token }, error = (string?)null });
+});
+
+app.MapPost("/api/auth/login", async (LoginRequest req, IDbCache cache) =>
+{
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    cmd.CommandText = "SELECT id, username, password_hash, salt, role FROM users WHERE username = @username";
+    cmd.Parameters.AddWithValue("@username", req.Username);
+    using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+        return Results.BadRequest(new { success = false, error = "用户名或密码错误" });
+
+    var userId = reader.GetInt32(0);
+    var username = reader.GetString(1);
+    var storedHash = reader.GetString(2);
+    var storedSalt = reader.GetString(3);
+    var role = reader.GetString(4);
+
+    if (HashPassword(req.Password, storedSalt) != storedHash)
+        return Results.BadRequest(new { success = false, error = "用户名或密码错误" });
+
+    var token = GenerateJwtToken(username, userId, role);
+    return Results.Ok(new { success = true, data = new { userId, username, role, token }, error = (string?)null });
+});
+
+app.MapGet("/api/auth/me", (ClaimsPrincipal user) =>
+{
+    if (user.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+    var userId = user.FindFirst("userId")?.Value;
+    var username = user.FindFirst(ClaimTypes.Name)?.Value;
+    var role = user.FindFirst(ClaimTypes.Role)?.Value;
+    return Results.Ok(new { success = true, data = new { userId, username, role }, error = (string?)null });
+}).RequireAuthorization();
+
+// ====== ⭐ 收藏模块 (/api/favorites) ======
+
+app.MapPost("/api/favorites", async (HttpRequest req, ClaimsPrincipal user) =>
+{
+    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+    var userId = int.Parse(user.FindFirst("userId")!.Value);
+
+    using var reader = new StreamReader(req.Body, System.Text.Encoding.UTF8);
+    var bodyText = await reader.ReadToEndAsync();
+    var body = JsonSerializer.Deserialize<JsonElement>(bodyText);
+    var tmdbId = body.GetProperty("tmdbId").GetInt32();
+    var mediaType = body.TryGetProperty("mediaType", out var mt) ? mt.GetString() ?? "movie" : "movie";
+    var title = body.TryGetProperty("title", out var t) ? t.GetString() : "";
+    var posterPath = body.TryGetProperty("posterPath", out var pp) ? pp.GetString() : "";
+
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    cmd.CommandText = @"INSERT OR IGNORE INTO favorites (user_id, tmdb_id, media_type, title, poster_path)
+                        VALUES (@userId, @tmdbId, @mediaType, @title, @posterPath)";
+    cmd.Parameters.AddWithValue("@userId", userId);
+    cmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+    cmd.Parameters.AddWithValue("@mediaType", mediaType);
+    cmd.Parameters.AddWithValue("@title", title ?? "");
+    cmd.Parameters.AddWithValue("@posterPath", posterPath ?? "");
+    await cmd.ExecuteNonQueryAsync();
+
+    return Results.Ok(new { success = true, error = (string?)null });
+}).RequireAuthorization();
+
+app.MapDelete("/api/favorites/{tmdbId:int}/{mediaType}", async (int tmdbId, string mediaType, ClaimsPrincipal user) =>
+{
+    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+    var userId = int.Parse(user.FindFirst("userId")!.Value);
+
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    cmd.CommandText = "DELETE FROM favorites WHERE user_id = @userId AND tmdb_id = @tmdbId AND media_type = @mediaType";
+    cmd.Parameters.AddWithValue("@userId", userId);
+    cmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+    cmd.Parameters.AddWithValue("@mediaType", mediaType);
+    await cmd.ExecuteNonQueryAsync();
+
+    return Results.Ok(new { success = true, error = (string?)null });
+}).RequireAuthorization();
+
+app.MapGet("/api/favorites", async (ClaimsPrincipal user) =>
+{
+    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+    var userId = int.Parse(user.FindFirst("userId")!.Value);
+
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    cmd.CommandText = @"SELECT f.id, f.tmdb_id, f.media_type, f.title, f.poster_path, f.added_at,
+                        (SELECT COUNT(*) FROM search_results WHERE favorite_id = f.id) as link_count
+                        FROM favorites f WHERE f.user_id = @userId ORDER BY f.added_at DESC";
+    cmd.Parameters.AddWithValue("@userId", userId);
+
+    var favorites = new List<object>();
+    using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+    {
+        favorites.Add(new {
+            id = reader.GetInt32(0),
+            tmdbId = reader.GetInt32(1),
+            mediaType = reader.GetString(2),
+            title = reader.GetString(3),
+            posterPath = reader.IsDBNull(4) ? "" : reader.GetString(4),
+            addedAt = reader.GetDateTime(5).ToString("o"),
+            linkCount = reader.GetInt32(6)
+        });
+    }
+
+    return Results.Ok(new { success = true, data = favorites, error = (string?)null });
+}).RequireAuthorization();
+
+app.MapGet("/api/favorites/{favoriteId:int}/links", async (int favoriteId, ClaimsPrincipal user) =>
+{
+    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+    var userId = int.Parse(user.FindFirst("userId")!.Value);
+
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    // 验证收藏属于当前用户
+    cmd.CommandText = "SELECT COUNT(*) FROM favorites WHERE id = @id AND user_id = @userId";
+    cmd.Parameters.AddWithValue("@id", favoriteId);
+    cmd.Parameters.AddWithValue("@userId", userId);
+    if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
+        return Results.NotFound(new { success = false, error = "收藏不存在" });
+
+    // 获取链接
+    cmd.CommandText = "SELECT id, source, cloud_type, title, url, password, found_at FROM search_results WHERE favorite_id = @id ORDER BY found_at DESC";
+    cmd.Parameters.Clear();
+    cmd.Parameters.AddWithValue("@id", favoriteId);
+
+    var links = new List<object>();
+    using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+    {
+        links.Add(new {
+            id = reader.GetInt32(0),
+            source = reader.GetString(1),
+            cloudType = reader.IsDBNull(2) ? "" : reader.GetString(2),
+            title = reader.IsDBNull(3) ? "" : reader.GetString(3),
+            url = reader.IsDBNull(4) ? "" : reader.GetString(4),
+            password = reader.IsDBNull(5) ? null : reader.GetString(5),
+            foundAt = reader.GetDateTime(6).ToString("o")
+        });
+    }
+
+    return Results.Ok(new { success = true, data = links, error = (string?)null });
+}).RequireAuthorization();
+
+app.MapPost("/api/favorites/{favoriteId:int}/search", async (int favoriteId, ClaimsPrincipal user, HubService hubService) =>
+{
+    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
+    var userId = int.Parse(user.FindFirst("userId")!.Value);
+
+    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    // 获取收藏信息
+    cmd.CommandText = "SELECT id, tmdb_id, title FROM favorites WHERE id = @id AND user_id = @userId";
+    cmd.Parameters.AddWithValue("@id", favoriteId);
+    cmd.Parameters.AddWithValue("@userId", userId);
+    using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+        return Results.NotFound(new { success = false, error = "收藏不存在" });
+
+    var favId = reader.GetInt32(0);
+    var tmdbId = reader.GetInt32(1);
+    var title = reader.GetString(2);
+    reader.Close();
+
+    // 搜索网盘
+    var searchResult = await hubService.SearchAsync(title);
+    var savedCount = 0;
+
+    foreach (var source in searchResult.Results)
+    {
+        foreach (var item in source.Items)
+        {
+            if (item == null) continue;
+            var obj = item.AsObject();
+            var url = obj.ContainsKey("url") ? obj["url"]?.GetValue<string>() : "";
+            if (string.IsNullOrEmpty(url)) continue;
+
+            cmd.CommandText = @"INSERT OR IGNORE INTO search_results (favorite_id, source, cloud_type, title, url, password)
+                                VALUES (@favId, @source, @cloudType, @title, @url, @password)";
+            cmd.Parameters.Clear();
+            cmd.Parameters.AddWithValue("@favId", favId);
+            cmd.Parameters.AddWithValue("@source", source.Name);
+            cmd.Parameters.AddWithValue("@cloudType", obj.ContainsKey("cloud_type") ? obj["cloud_type"]?.GetValue<string>() : "");
+            cmd.Parameters.AddWithValue("@title", obj.ContainsKey("title") ? obj["title"]?.GetValue<string>() : "");
+            cmd.Parameters.AddWithValue("@url", url);
+            cmd.Parameters.AddWithValue("@password", obj.ContainsKey("password") ? obj["password"]?.GetValue<string>() : null);
+            savedCount += await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    return Results.Ok(new { success = true, data = new { savedCount }, error = (string?)null });
+}).RequireAuthorization();
 
 // ====== 健康检查 ======
 app.MapGet("/health", () => Results.Ok(new {
@@ -295,9 +626,9 @@ app.MapPost("/api/search", async (HttpRequest req, HubService hub) =>
 {
     var body = await JsonSerializer.DeserializeAsync<JsonElement>(req.Body, cancellationToken: req.HttpContext.RequestAborted);
     var keyword = body.TryGetProperty("keyword", out var kw) ? kw.GetString() : null;
-    if (string.IsNullOrWhiteSpace(keyword)) 
+    if (string.IsNullOrWhiteSpace(keyword))
         return Results.BadRequest(new { success = false, data = (object?)null, error = "关键词不能为空" });
-    
+
     var result = await hub.SearchAsync(keyword);
     // Transform to flat list for MainSite/frontend
     var flatItems = new List<object>();
@@ -318,6 +649,73 @@ app.MapPost("/api/search", async (HttpRequest req, HubService hub) =>
         }
     }
     return Results.Ok(new { success = true, data = flatItems, error = (string?)null });
+});
+
+// GET /api/movie/discover - 发现影视（支持流派/年份/评分筛选）
+app.MapGet("/api/movie/discover", async (string? type, int? genreId, int? year, double? minRating, int page, IHttpClientFactory f, IDbCache cache) =>
+{
+    var mediaType = type ?? "movie";
+    var key = $"discover2/{mediaType}?genre={genreId}&year={year}&min={minRating}&page={page}";
+    var cached = await cache.Get(key);
+    if (cached != null) return Results.Content(cached, "application/json");
+
+    var client = f.CreateClient("tmdb");
+    var path = $"discover/{(mediaType == "tv" ? "tv" : "movie")}?api_key={tmdbApiKey}&language=zh-CN&page={page}&sort_by=popularity.desc";
+
+    if (genreId.HasValue && genreId.Value > 0)
+        path += $"&with_genres={genreId.Value}";
+    if (year.HasValue && year.Value > 0)
+    {
+        var dateField = mediaType == "tv" ? "first_air_date_year" : "primary_release_year";
+        path += $"&{dateField}={year.Value}";
+    }
+    if (minRating.HasValue && minRating.Value > 0)
+        path += $"&vote_average.gte={minRating.Value}";
+
+    var tmdbResp = await client.GetAsync(path);
+    if (!tmdbResp.IsSuccessStatusCode) return Results.StatusCode(502);
+    var raw = await tmdbResp.Content.ReadAsStringAsync();
+
+    using var doc = JsonDocument.Parse(raw);
+    var results = doc.RootElement.GetProperty("results").EnumerateArray()
+        .Select(e => TmdbToDto(e, mediaType))
+        .ToList();
+
+    var totalPages = doc.RootElement.TryGetProperty("total_pages", out var tp) ? tp.GetInt32() : 1;
+    var response = JsonSerializer.Serialize(new {
+        success = true,
+        data = results,
+        page,
+        totalPages,
+        error = (string?)null
+    });
+
+    if (results.Count > 0) await cache.Set(key, response, 1800);
+    return Results.Content(response, "application/json");
+});
+
+// GET /api/movie/genres - 获取流派列表
+app.MapGet("/api/movie/genres", async (string? type, IHttpClientFactory f, IDbCache cache) =>
+{
+    var mediaType = type ?? "movie";
+    var key = $"genres/{mediaType}";
+    var cached = await cache.Get(key);
+    if (cached != null) return Results.Content(cached, "application/json");
+
+    var client = f.CreateClient("tmdb");
+    var path = $"genre/{(mediaType == "tv" ? "tv" : "movie")}/list?api_key={tmdbApiKey}&language=zh-CN";
+    var tmdbResp = await client.GetAsync(path);
+    if (!tmdbResp.IsSuccessStatusCode) return Results.StatusCode(502);
+    var raw = await tmdbResp.Content.ReadAsStringAsync();
+
+    using var doc = JsonDocument.Parse(raw);
+    var genres = doc.RootElement.GetProperty("genres").EnumerateArray()
+        .Select(g => new { id = g.GetProperty("id").GetInt32(), name = g.GetProperty("name").GetString() ?? "" })
+        .ToList();
+
+    var response = JsonSerializer.Serialize(new { success = true, data = genres, error = (string?)null });
+    await cache.Set(key, response, 86400); // 24h
+    return Results.Content(response, "application/json");
 });
 
 // ====== 🔍 聚合搜索模块 (GET) ======
@@ -383,7 +781,45 @@ async Task<string?> ProxyGet(IHttpClientFactory f, string path)
     return r.IsSuccessStatusCode ? await r.Content.ReadAsStringAsync() : null;
 }
 
+static string GenerateSalt()
+{
+    var bytes = RandomNumberGenerator.GetBytes(16);
+    return Convert.ToBase64String(bytes);
+}
+
+static string HashPassword(string password, string salt)
+{
+    using var sha256 = SHA256.Create();
+    var bytes = Encoding.UTF8.GetBytes(salt + password);
+    var hash = sha256.ComputeHash(bytes);
+    return Convert.ToBase64String(hash);
+}
+
+static string GenerateJwtToken(string username, int userId, string role)
+{
+    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(
+        Environment.GetEnvironmentVariable("JWT_SECRET") ?? "zhuiying-dev-secret-key-change-in-production-2026"));
+    var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+    var claims = new[]
+    {
+        new Claim(ClaimTypes.Name, username),
+        new Claim("userId", userId.ToString()),
+        new Claim(ClaimTypes.Role, role)
+    };
+    var token = new JwtSecurityToken(
+        issuer: "zhuiying-hub",
+        audience: "zhuiying-main-site",
+        claims: claims,
+        expires: DateTime.UtcNow.AddDays(7),
+        signingCredentials: credentials);
+    return new JwtSecurityTokenHandler().WriteToken(token);
+}
+
 // ====== 类型声明 (Top-level 规范: 必须放最后) ======
+public record RegisterRequest(string Username, string Password, string? Email = null);
+public record LoginRequest(string Username, string Password);
+public record FavoriteRequest(int TmdbId, string? MediaType = null, string? Title = null, string? PosterPath = null);
+
 public interface IDbCache
 {
     Task<string?> Get(string key);
@@ -510,9 +946,11 @@ public class HubService
             {
                 var client = _factory.CreateClient();
                 var res = await client.PostAsJsonAsync(s.ApiUrl, new { query });
-                var raw = await res.Content.ReadAsStringAsync();
+                using var stream = await res.Content.ReadAsStreamAsync();
+                using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+                var raw = await reader.ReadToEndAsync();
                 if (!res.IsSuccessStatusCode) return new SourceResult(s.Name, new List<System.Text.Json.Nodes.JsonNode?> { System.Text.Json.Nodes.JsonNode.Parse("{\"error\":\"HTTP " + (int)res.StatusCode + "\"}") });
-                
+
                 List<System.Text.Json.Nodes.JsonNode?> items;
                 try
                 {
@@ -563,5 +1001,102 @@ public class HubService
         });
         var results = await Task.WhenAll(tasks);
         return new SearchResponse(query, results.ToList());
+    }
+}
+
+// ====== 后台定时搜索服务 ======
+public class FavoriteSearchWorker : BackgroundService
+{
+    private readonly IServiceProvider _services;
+    private readonly ILogger<FavoriteSearchWorker> _logger;
+
+    public FavoriteSearchWorker(IServiceProvider services, ILogger<FavoriteSearchWorker> logger)
+    {
+        _services = services;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("FavoriteSearchWorker 启动，每小时搜索一次");
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = _services.CreateScope();
+                var hubService = scope.ServiceProvider.GetRequiredService<HubService>();
+
+                var dbPath = Path.Combine(
+                    scope.ServiceProvider.GetRequiredService<IHostEnvironment>().ContentRootPath,
+                    "data", "tmdb_cache.db");
+
+                await using var conn = new SqliteConnection($"Data Source={dbPath}");
+                await conn.OpenAsync();
+
+                // 查找没有链接的收藏
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+                    SELECT f.id, f.title FROM favorites f
+                    WHERE f.id NOT IN (SELECT DISTINCT favorite_id FROM search_results)
+                    ORDER BY f.added_at ASC";
+
+                var favoritesToSearch = new List<(int Id, string Title)>();
+                using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    favoritesToSearch.Add((reader.GetInt32(0), reader.GetString(1)));
+                }
+                reader.Close();
+
+                if (favoritesToSearch.Count == 0)
+                {
+                    _logger.LogDebug("没有待搜索的收藏");
+                }
+                else
+                {
+                    _logger.LogInformation("开始搜索 {Count} 个收藏的链接", favoritesToSearch.Count);
+
+                    foreach (var (favId, title) in favoritesToSearch)
+                    {
+                        if (string.IsNullOrEmpty(title)) continue;
+
+                        _logger.LogInformation("搜索收藏 #{FavId}: {Title}", favId, title);
+                        var searchResult = await hubService.SearchAsync(title);
+
+                        using var insertCmd = conn.CreateCommand();
+                        foreach (var source in searchResult.Results)
+                        {
+                            foreach (var item in source.Items)
+                            {
+                                if (item == null) continue;
+                                var obj = item.AsObject();
+                                var url = obj.ContainsKey("url") ? obj["url"]?.GetValue<string>() : "";
+                                if (string.IsNullOrEmpty(url)) continue;
+
+                                insertCmd.CommandText = @"
+                                    INSERT OR IGNORE INTO search_results (favorite_id, source, cloud_type, title, url, password)
+                                    VALUES (@favId, @source, @cloudType, @title, @url, @password)";
+                                insertCmd.Parameters.Clear();
+                                insertCmd.Parameters.AddWithValue("@favId", favId);
+                                insertCmd.Parameters.AddWithValue("@source", source.Name);
+                                insertCmd.Parameters.AddWithValue("@cloudType", obj.ContainsKey("cloud_type") ? obj["cloud_type"]?.GetValue<string>() : "");
+                                insertCmd.Parameters.AddWithValue("@title", obj.ContainsKey("title") ? obj["title"]?.GetValue<string>() : "");
+                                insertCmd.Parameters.AddWithValue("@url", url);
+                                insertCmd.Parameters.AddWithValue("@password", obj.ContainsKey("password") ? obj["password"]?.GetValue<string>() : null);
+                                await insertCmd.ExecuteNonQueryAsync();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "后台搜索出错");
+            }
+
+            // 每小时搜索一次
+            await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
+        }
     }
 }

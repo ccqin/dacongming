@@ -11,7 +11,6 @@
             <div class="filter-group">
                 <label>类型</label>
                 <select @bind="selectedType" @bind:after="ApplyFilters">
-                    <option value="">全部</option>
                     <option value="movie">电影</option>
                     <option value="tv">电视剧</option>
                 </select>
@@ -19,8 +18,8 @@
 
             <div class="filter-group">
                 <label>流派</label>
-                <select @bind="selectedGenre" @bind:after="ApplyFilters">
-                    <option value="">全部流派</option>
+                <select @bind="selectedGenreId" @bind:after="ApplyFilters">
+                    <option value="0">全部流派</option>
                     @foreach (var genre in genres)
                     {
                         <option value="@genre.Id">@genre.Name</option>
@@ -31,7 +30,7 @@
             <div class="filter-group">
                 <label>年份</label>
                 <select @bind="selectedYear" @bind:after="ApplyFilters">
-                    <option value="">全部年份</option>
+                    <option value="0">全部年份</option>
                     @foreach (var year in years)
                     {
                         <option value="@year">@year</option>
@@ -55,92 +54,83 @@
 
     @if (isLoading)
     {
-        <div class="loading-container">
-            <div class="skeleton-grid">
-                @for (int i = 0; i < 12; i++)
-                {
-                    <div class="skeleton-card">
-                        <div class="skeleton-poster shimmer"></div>
-                        <div class="skeleton-info">
-                            <div class="skeleton-title shimmer"></div>
-                            <div class="skeleton-meta shimmer"></div>
-                        </div>
-                    </div>
-                }
-            </div>
+        <div class="skeleton-grid">
+            @for (int i = 0; i < 12; i++)
+            {
+                <div class="skeleton-card">
+                    <div class="skeleton-poster shimmer"></div>
+                </div>
+            }
         </div>
     }
-    else if (filteredMovies.Count == 0)
+    else if (movies.Count == 0)
     {
         <div class="empty-state">
             <div class="empty-icon">🎭</div>
             <h2>暂无结果</h2>
-            <p>没有找到符合条件的影视作品</p>
+            <p>没有找到符合条件的影视作品，试试调整筛选条件</p>
             <button class="reset-btn" @onclick="ResetFilters">重置筛选</button>
         </div>
     }
     else
     {
         <div class="results-info">
-            <span>共找到 @filteredMovies.Count 部作品</span>
+            <span>第 @currentPage / @totalPages 页，共找到 @movies.Count 部作品</span>
         </div>
 
         <div class="results-grid">
-            @foreach (var movie in filteredMovies)
+            @foreach (var movie in movies)
             {
-                <MovieCard Movie="movie" />
+                <MovieCard Movie="movie" OnClick="() => GoToDetail(movie.TmdbId, movie.MediaType)" />
             }
         </div>
+
+        @if (totalPages > 1)
+        {
+            <div class="pagination">
+                <button class="page-btn" disabled="@(currentPage <= 1)" @onclick="PrevPage">上一页</button>
+                <span class="page-info">@currentPage / @totalPages</span>
+                <button class="page-btn" disabled="@(currentPage >= totalPages)" @onclick="NextPage">下一页</button>
+            </div>
+        }
     }
 </div>
 
 @code {
-    private string selectedType = "";
-    private string selectedGenre = "";
-    private string selectedYear = "";
+    private string selectedType = "movie";
+    private int selectedGenreId = 0;
+    private int selectedYear = 0;
     private double minRating = 0;
-    
-    private List<Movie> allMovies = new();
-    private List<Movie> filteredMovies = new();
-    private bool isLoading = true;
-    
+
+    private List<Movie> movies = new();
     private List<Genre> genres = new();
     private List<int> years = new();
+    private bool isLoading = true;
+    private int currentPage = 1;
+    private int totalPages = 1;
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadGenresAndYears();
+        // 生成年份列表（最近 15 年）
+        var currentYear = DateTime.Now.Year;
+        years = Enumerable.Range(currentYear - 14, 15).OrderByDescending(y => y).ToList();
+
+        await LoadGenres();
         await LoadAndFilterMovies();
     }
 
-    private async Task LoadGenresAndYears()
+    private async Task LoadGenres()
     {
-        // 从 TMDB 获取流派列表（这里简化处理，实际应该调用 API）
-        genres = new List<Genre>
+        try
         {
-            new Genre { Id = 28, Name = "动作" },
-            new Genre { Id = 12, Name = "冒险" },
-            new Genre { Id = 16, Name = "动画" },
-            new Genre { Id = 35, Name = "喜剧" },
-            new Genre { Id = 80, Name = "犯罪" },
-            new Genre { Id = 99, Name = "纪录" },
-            new Genre { Id = 18, Name = "剧情" },
-            new Genre { Id = 10751, Name = "家庭" },
-            new Genre { Id = 14, Name = "奇幻" },
-            new Genre { Id = 36, Name = "历史" },
-            new Genre { Id = 27, Name = "恐怖" },
-            new Genre { Id = 10402, Name = "音乐" },
-            new Genre { Id = 9648, Name = "悬疑" },
-            new Genre { Id = 10749, Name = "爱情" },
-            new Genre { Id = 878, Name = "科幻" },
-            new Genre { Id = 53, Name = "惊悚" },
-            new Genre { Id = 10752, Name = "战争" },
-            new Genre { Id = 37, Name = "西部" }
-        };
-
-        // 生成年份列表（最近 10 年）
-        var currentYear = DateTime.Now.Year;
-        years = Enumerable.Range(currentYear - 10, 11).OrderByDescending(y => y).ToList();
+            genres = await MovieService.GetGenresAsync(selectedType);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载流派失败: {ex.Message}");
+            // 使用硬编码的默认流派作为备选
+            genres = GetDefaultGenres();
+        }
     }
 
     private async Task LoadAndFilterMovies()
@@ -150,21 +140,21 @@
 
         try
         {
-            // 加载热门和最新数据
-            var trendingMovies = await MovieService.GetTrendingMoviesAsync();
-            var latestMovies = await MovieService.GetLatestMoviesAsync();
-            
-            // 合并并去重
-            allMovies = trendingMovies.Concat(latestMovies)
-                .GroupBy(m => m.TmdbId)
-                .Select(g => g.First())
-                .ToList();
+            int? genreId = selectedGenreId > 0 ? selectedGenreId : null;
+            int? year = selectedYear > 0 ? selectedYear : null;
+            double? rating = minRating > 0 ? minRating : null;
 
-            ApplyFilters();
+            var (result, pages) = await MovieService.DiscoverMoviesAsync(
+                type: selectedType, genreId: genreId, year: year,
+                minRating: rating, page: currentPage);
+
+            movies = result;
+            totalPages = pages > 0 ? pages : 1;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"加载数据失败: {ex.Message}");
+            movies.Clear();
         }
         finally
         {
@@ -173,47 +163,65 @@
         }
     }
 
-    private void ApplyFilters()
+    private async Task ApplyFilters()
     {
-        IEnumerable<Movie> result = allMovies;
+        currentPage = 1;
+        // 如果类型变了，重新加载流派
+        await LoadGenres();
+        await LoadAndFilterMovies();
+    }
 
-        // 类型筛选
-        if (!string.IsNullOrEmpty(selectedType))
+    private async Task NextPage()
+    {
+        if (currentPage < totalPages)
         {
-            result = result.Where(m => m.MediaType == selectedType);
+            currentPage++;
+            await LoadAndFilterMovies();
         }
+    }
 
-        // 年份筛选
-        if (!string.IsNullOrEmpty(selectedYear))
+    private async Task PrevPage()
+    {
+        if (currentPage > 1)
         {
-            result = result.Where(m => 
-                !string.IsNullOrEmpty(m.ReleaseDate) && 
-                m.ReleaseDate.StartsWith(selectedYear));
+            currentPage--;
+            await LoadAndFilterMovies();
         }
-
-        // 评分筛选
-        if (minRating > 0)
-        {
-            result = result.Where(m => m.TmdbVoteAverage >= minRating);
-        }
-
-        filteredMovies = result.OrderByDescending(m => m.TmdbVoteAverage).ToList();
     }
 
     private async Task ResetFilters()
     {
-        selectedType = "";
-        selectedGenre = "";
-        selectedYear = "";
+        selectedType = "movie";
+        selectedGenreId = 0;
+        selectedYear = 0;
         minRating = 0;
-        
+        currentPage = 1;
+        await LoadGenres();
         await LoadAndFilterMovies();
     }
+
+    private void GoToDetail(int tmdbId, string mediaType)
+    {
+        Navigation.NavigateTo($"/movie/{mediaType}/{tmdbId}");
+    }
+
+    private static List<Genre> GetDefaultGenres() => new()
+    {
+        new Genre { Id = 28, Name = "动作" }, new Genre { Id = 12, Name = "冒险" },
+        new Genre { Id = 16, Name = "动画" }, new Genre { Id = 35, Name = "喜剧" },
+        new Genre { Id = 80, Name = "犯罪" }, new Genre { Id = 99, Name = "纪录" },
+        new Genre { Id = 18, Name = "剧情" }, new Genre { Id = 10751, Name = "家庭" },
+        new Genre { Id = 14, Name = "奇幻" }, new Genre { Id = 36, Name = "历史" },
+        new Genre { Id = 27, Name = "恐怖" }, new Genre { Id = 10402, Name = "音乐" },
+        new Genre { Id = 9648, Name = "悬疑" }, new Genre { Id = 10749, Name = "爱情" },
+        new Genre { Id = 878, Name = "科幻" }, new Genre { Id = 53, Name = "惊悚" },
+        new Genre { Id = 10752, Name = "战争" }, new Genre { Id = 37, Name = "西部" }
+    };
 }
 
 <style>
     .browse-page {
-        padding: 2rem 4%;
+        padding: 80px 5% 40px;
         min-height: 100vh;
     }
 
@@ -231,7 +239,7 @@
         gap: 1.5rem;
         flex-wrap: wrap;
         padding: 1.5rem;
-        background: var(--zhui-surface);
+        background: var(--zhui-surface, #141414);
         border-radius: 12px;
     }
 
@@ -244,25 +252,21 @@
 
     .filter-group label {
         font-size: 0.9rem;
-        color: var(--zhui-muted);
+        color: var(--zhui-muted, #94a3b8);
     }
 
     .filter-group select {
         padding: 0.5rem;
-        background: var(--zhui-card);
+        background: var(--zhui-card, #1a1a2e);
         border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 6px;
-        color: var(--zhui-text);
+        color: var(--zhui-text, #f8fafc);
         cursor: pointer;
     }
 
     .filter-group select:focus {
         outline: none;
-        border-color: var(--zhui-primary);
-    }
-
-    .loading-container {
-        margin-top: 2rem;
+        border-color: var(--zhui-primary, #e50914);
     }
 
     .skeleton-grid {
@@ -280,27 +284,7 @@
     .skeleton-poster {
         aspect-ratio: 2/3;
         border-radius: 8px;
-        background: var(--zhui-card);
-    }
-
-    .skeleton-info {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-    }
-
-    .skeleton-title {
-        height: 1.2rem;
-        width: 80%;
-        border-radius: 4px;
-        background: var(--zhui-card);
-    }
-
-    .skeleton-meta {
-        height: 0.9rem;
-        width: 50%;
-        border-radius: 4px;
-        background: var(--zhui-card);
+        background: var(--zhui-card, #1a1a2e);
     }
 
     .shimmer {
@@ -329,13 +313,13 @@
     }
 
     .empty-state p {
-        color: var(--zhui-muted);
+        color: var(--zhui-muted, #94a3b8);
         margin-bottom: 1.5rem;
     }
 
     .reset-btn {
         padding: 0.75rem 1.5rem;
-        background: var(--zhui-primary);
+        background: var(--zhui-primary, #e50914);
         border: none;
         border-radius: 6px;
         color: white;
@@ -344,12 +328,13 @@
     }
 
     .reset-btn:hover {
-        background: var(--zhui-primary-dark);
+        opacity: 0.9;
     }
 
     .results-info {
         margin-bottom: 1.5rem;
-        color: var(--zhui-muted);
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.9rem;
     }
 
     .results-grid {
@@ -358,9 +343,44 @@
         gap: 1.5rem;
     }
 
+    .pagination {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 1.5rem;
+        margin-top: 2rem;
+        padding: 1rem;
+    }
+
+    .page-btn {
+        padding: 0.6rem 1.5rem;
+        background: var(--zhui-surface, #141414);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        color: var(--zhui-text, #f8fafc);
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+    }
+
+    .page-btn:hover:not(:disabled) {
+        background: var(--zhui-primary, #e50914);
+        border-color: var(--zhui-primary, #e50914);
+    }
+
+    .page-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+
+    .page-info {
+        color: var(--zhui-muted, #94a3b8);
+        font-size: 0.9rem;
+    }
+
     @@media (max-width: 768px) {
         .browse-page {
-            padding: 1rem 4%;
+            padding: 80px 4% 40px;
         }
 
         .browse-header h1 {
