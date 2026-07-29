@@ -1,0 +1,139 @@
+@using MudBlazor
+@using Zhuiying.MainSite.Services
+
+<MudDialog>
+    <TitleContent>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" />
+            <span>添加网盘</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+            <MudSelect T="string" @bind-Value="driveType" Label="网盘类型" Variant="Variant.Outlined">
+                <MudSelectItem Value="@("123")">123网盘</MudSelectItem>
+                <MudSelectItem Value="@("115")">115网盘</MudSelectItem>
+            </MudSelect>
+
+            <MudTextField @bind-Value="driveName" Label="账号名称（可选）" Variant="Variant.Outlined" 
+                          Placeholder="例如：我的123网盘" />
+
+            <MudTextField @bind-Value="cookie" Label="Cookie" Variant="Variant.Outlined" 
+                          Lines="3" Placeholder="粘贴从浏览器复制的 Cookie" />
+
+            @if (showTutorial)
+            {
+                <div class="cookie-tutorial">
+                    <h4>如何获取 Cookie？</h4>
+                    <ol>
+                        <li>在浏览器中登录 <strong>@(driveType == "123" ? "www.123pan.com" : "www.115.com")</strong></li>
+                        <li>按 <kbd>F12</kbd> 打开开发者工具</li>
+                        <li>切换到 <strong>Network（网络）</strong> 标签</li>
+                        <li>刷新页面，点击任意一个请求</li>
+                        <li>在请求头中找到 <strong>Cookie</strong> 字段</li>
+                        <li>复制完整的 Cookie 值粘贴到上方输入框</li>
+                    </ol>
+                    <p class="warning">⚠️ Cookie 包含你的登录凭证，请妥善保管。系统会加密存储。</p>
+                </div>
+            }
+
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ToggleTutorial"
+                       StartIcon="@(showTutorial ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)">
+                @(showTutorial ? "收起教程" : "如何获取 Cookie？")
+            </MudButton>
+
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <MudAlert Severity="Severity.Error">@error</MudAlert>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">取消</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Primary" Variant="Variant.Filled" Disabled="@isSubmitting">
+            @(isSubmitting ? "添加中..." : "添加")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<style>
+    .cookie-tutorial {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        padding: 1rem;
+        font-size: 0.9rem;
+    }
+    .cookie-tutorial h4 {
+        margin: 0 0 0.5rem 0;
+        font-size: 0.95rem;
+    }
+    .cookie-tutorial ol {
+        margin: 0;
+        padding-left: 1.5rem;
+    }
+    .cookie-tutorial li {
+        margin-bottom: 0.25rem;
+    }
+    .cookie-tutorial kbd {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 0.1rem 0.4rem;
+        border-radius: 3px;
+        font-size: 0.85rem;
+    }
+    .cookie-tutorial .warning {
+        margin-top: 0.75rem;
+        color: #ffa726;
+        font-size: 0.85rem;
+    }
+</style>
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Inject] private CloudDriveService CloudDriveService { get; set; } = default!;
+
+    private string driveType = "123";
+    private string? driveName;
+    private string cookie = "";
+    private bool showTutorial = true;
+    private bool isSubmitting;
+    private string? error;
+
+    private void ToggleTutorial() => showTutorial = !showTutorial;
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(cookie))
+        {
+            error = "Cookie 不能为空";
+            return;
+        }
+
+        isSubmitting = true;
+        error = null;
+        StateHasChanged();
+
+        try
+        {
+            var (success, errorMsg) = await CloudDriveService.AddDriveAsync(driveType, driveName, cookie);
+            if (success)
+            {
+                MudDialog?.Close(DialogResult.Ok(true));
+            }
+            else
+            {
+                error = errorMsg ?? "添加失败";
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"出错: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+}

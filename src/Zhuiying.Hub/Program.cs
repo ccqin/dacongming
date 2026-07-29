@@ -83,16 +83,117 @@ await using (var conn = new SqliteConnection($"Data Source={dbPath}"))
 
         CREATE TABLE IF NOT EXISTS search_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            favorite_id INTEGER NOT NULL,
+            tmdb_id INTEGER NOT NULL,
+            media_type TEXT NOT NULL DEFAULT 'movie',
             source TEXT NOT NULL,
             cloud_type TEXT,
             title TEXT,
             url TEXT,
             password TEXT,
             found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (favorite_id) REFERENCES favorites(id) ON DELETE CASCADE
+            UNIQUE(tmdb_id, media_type, url)
         );
-        CREATE INDEX IF NOT EXISTS idx_search_results_favorite ON search_results(favorite_id);";
+        CREATE INDEX IF NOT EXISTS idx_search_tmdb ON search_results(tmdb_id, media_type);";
+
+    // 添加网盘转存相关表
+    cmd.CommandText += @"
+        CREATE TABLE IF NOT EXISTS cloud_drives (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            name TEXT,
+            encrypted_cookie TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            expires_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cloud_drives_user ON cloud_drives(user_id);
+        CREATE INDEX IF NOT EXISTS idx_cloud_drives_type ON cloud_drives(type);
+
+        CREATE TABLE IF NOT EXISTS transfers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            drive_id INTEGER NOT NULL,
+            tmdb_id INTEGER NOT NULL,
+            media_type TEXT NOT NULL,
+            season INTEGER,
+            episode INTEGER,
+            source_url TEXT NOT NULL,
+            source_title TEXT,
+            file_size INTEGER,
+            quality TEXT,
+            target_path TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            error_message TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            completed_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            FOREIGN KEY (drive_id) REFERENCES cloud_drives(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_transfers_user ON transfers(user_id);
+        CREATE INDEX IF NOT EXISTS idx_transfers_tmdb ON transfers(tmdb_id, media_type);
+        CREATE INDEX IF NOT EXISTS idx_transfers_status ON transfers(status);
+
+        CREATE TABLE IF NOT EXISTS transferred_episodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tmdb_id INTEGER NOT NULL,
+            media_type TEXT NOT NULL,
+            season INTEGER NOT NULL,
+            episode INTEGER NOT NULL,
+            drive_id INTEGER NOT NULL,
+            file_path TEXT,
+            file_size INTEGER,
+            quality TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(tmdb_id, media_type, season, episode, drive_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_episodes_tmdb ON transferred_episodes(tmdb_id, media_type);
+
+        CREATE TABLE IF NOT EXISTS storage_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL UNIQUE,
+            config_json TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_storage_configs_user ON storage_configs(user_id);";
+    
+    // 检查并迁移旧表结构
+    cmd.CommandText = "PRAGMA table_info(search_results)";
+    using (var reader = await cmd.ExecuteReaderAsync())
+    {
+        var columns = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1)); // column name
+        }
+        reader.Close();
+        
+        // 如果表存在但没有 tmdb_id 列，说明是旧结构，需要迁移
+        if (columns.Any() && !columns.Contains("tmdb_id"))
+        {
+            cmd.CommandText = "DROP TABLE search_results";
+            await cmd.ExecuteNonQueryAsync();
+            
+            cmd.CommandText = @"
+                CREATE TABLE search_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tmdb_id INTEGER NOT NULL,
+                    media_type TEXT NOT NULL DEFAULT 'movie',
+                    source TEXT NOT NULL,
+                    cloud_type TEXT,
+                    title TEXT,
+                    url TEXT,
+                    password TEXT,
+                    found_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(tmdb_id, media_type, url)
+                );
+                CREATE INDEX idx_search_tmdb ON search_results(tmdb_id, media_type);";
+        }
+    }
     await cmd.ExecuteNonQueryAsync();
     cmd.CommandText = "DELETE FROM tmdb_cache";
     await cmd.ExecuteNonQueryAsync();
@@ -121,6 +222,10 @@ builder.Services.AddHttpClient("tmdb", c => { c.BaseAddress = new Uri("https://a
 builder.Services.AddHttpClient();
 builder.Services.AddCors();
 builder.Services.AddSingleton<HubService>();
+
+// 注册网盘服务
+builder.Services.AddScoped<Zhuiying.Hub.Services.CloudDrive123Service>();
+builder.Services.AddScoped<Zhuiying.Hub.Services.CloudDrive115Service>();
 
 var app = builder.Build();
 app.UseCors(c => c.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
@@ -159,6 +264,19 @@ app.MapPost("/api/auth/register", async (RegisterRequest req, IDbCache cache) =>
     cmd.Parameters.AddWithValue("@hash", HashPassword(req.Password, salt));
     cmd.Parameters.AddWithValue("@salt", salt);
     var userId = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+    // 创建默认存储配置
+    var defaultConfig = JsonSerializer.Serialize(new
+    {
+        moviePath = "",
+        tvPath = "",
+        templateVariables = new[] { "{title}", "{year}", "{tmdb_id}", "{season}", "{quality}", "{subtitle}", "{genre}", "{filename}" }
+    });
+    cmd.CommandText = "INSERT INTO storage_configs (user_id, config_json) VALUES (@userId, @config)";
+    cmd.Parameters.Clear();
+    cmd.Parameters.AddWithValue("@userId", userId);
+    cmd.Parameters.AddWithValue("@config", defaultConfig);
+    await cmd.ExecuteNonQueryAsync();
 
     var token = GenerateJwtToken(req.Username, userId, "user");
     return Results.Ok(new { success = true, data = new { userId, username = req.Username, token }, error = (string?)null });
@@ -262,7 +380,7 @@ app.MapGet("/api/favorites", async (ClaimsPrincipal user) =>
     using var cmd = conn.CreateCommand();
 
     cmd.CommandText = @"SELECT f.id, f.tmdb_id, f.media_type, f.title, f.poster_path, f.added_at,
-                        (SELECT COUNT(*) FROM search_results WHERE favorite_id = f.id) as link_count
+                        0 as link_count
                         FROM favorites f WHERE f.user_id = @userId ORDER BY f.added_at DESC";
     cmd.Parameters.AddWithValue("@userId", userId);
 
@@ -284,27 +402,27 @@ app.MapGet("/api/favorites", async (ClaimsPrincipal user) =>
     return Results.Ok(new { success = true, data = favorites, error = (string?)null });
 }).RequireAuthorization();
 
-app.MapGet("/api/favorites/{favoriteId:int}/links", async (int favoriteId, ClaimsPrincipal user) =>
-{
-    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-    var userId = int.Parse(user.FindFirst("userId")!.Value);
 
-    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
+
+
+
+
+// ====== 🔍 按 TMDB ID 搜索网盘资源 ======
+app.MapGet("/api/search/links/{tmdbId:int}/{mediaType}", async (int tmdbId, string mediaType, IDbCache cache) =>
+{
+    var dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "tmdb_cache.db");
     await using var conn = new SqliteConnection($"Data Source={dbPath}");
     await conn.OpenAsync();
     using var cmd = conn.CreateCommand();
 
-    // 验证收藏属于当前用户
-    cmd.CommandText = "SELECT COUNT(*) FROM favorites WHERE id = @id AND user_id = @userId";
-    cmd.Parameters.AddWithValue("@id", favoriteId);
-    cmd.Parameters.AddWithValue("@userId", userId);
-    if (Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 0)
-        return Results.NotFound(new { success = false, error = "收藏不存在" });
-
-    // 获取链接
-    cmd.CommandText = "SELECT id, source, cloud_type, title, url, password, found_at FROM search_results WHERE favorite_id = @id ORDER BY found_at DESC";
-    cmd.Parameters.Clear();
-    cmd.Parameters.AddWithValue("@id", favoriteId);
+    // 查询24小时内的结果
+    cmd.CommandText = @"SELECT id, source, cloud_type, title, url, password, found_at 
+                        FROM search_results 
+                        WHERE tmdb_id = @tmdbId AND media_type = @mediaType 
+                        AND found_at > datetime('now', '-24 hours')
+                        ORDER BY cloud_type, found_at DESC";
+    cmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+    cmd.Parameters.AddWithValue("@mediaType", mediaType);
 
     var links = new List<object>();
     using var reader = await cmd.ExecuteReaderAsync();
@@ -322,34 +440,33 @@ app.MapGet("/api/favorites/{favoriteId:int}/links", async (int favoriteId, Claim
     }
 
     return Results.Ok(new { success = true, data = links, error = (string?)null });
-}).RequireAuthorization();
+});
 
-app.MapPost("/api/favorites/{favoriteId:int}/search", async (int favoriteId, ClaimsPrincipal user, HubService hubService) =>
+// ====== 🔍 按 TMDB ID 搜索并保存网盘资源 ======
+app.MapPost("/api/search/links/{tmdbId:int}/{mediaType}", async (int tmdbId, string mediaType, HubService hubService) =>
 {
-    if (user.Identity?.IsAuthenticated != true) return Results.Unauthorized();
-    var userId = int.Parse(user.FindFirst("userId")!.Value);
+    // 先查询影视标题
+    var client = hubService.HttpFactory.CreateClient("tmdb");
+    var path = $"{(mediaType == "tv" ? "tv" : "movie")}/{tmdbId}?api_key={tmdbApiKey}&language=zh-CN";
+    var response = await client.GetAsync(path);
+    if (!response.IsSuccessStatusCode)
+        return Results.BadRequest(new { success = false, error = "影视不存在" });
 
-    var dbPath = Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db");
-    await using var conn = new SqliteConnection($"Data Source={dbPath}");
-    await conn.OpenAsync();
-    using var cmd = conn.CreateCommand();
+    var json = await response.Content.ReadAsStringAsync();
+    using var doc = JsonDocument.Parse(json);
+    var title = doc.RootElement.TryGetProperty("title", out var t) ? t.GetString()
+        : doc.RootElement.TryGetProperty("name", out var n) ? n.GetString() : "";
 
-    // 获取收藏信息
-    cmd.CommandText = "SELECT id, tmdb_id, title FROM favorites WHERE id = @id AND user_id = @userId";
-    cmd.Parameters.AddWithValue("@id", favoriteId);
-    cmd.Parameters.AddWithValue("@userId", userId);
-    using var reader = await cmd.ExecuteReaderAsync();
-    if (!await reader.ReadAsync())
-        return Results.NotFound(new { success = false, error = "收藏不存在" });
-
-    var favId = reader.GetInt32(0);
-    var tmdbId = reader.GetInt32(1);
-    var title = reader.GetString(2);
-    reader.Close();
+    if (string.IsNullOrEmpty(title))
+        return Results.BadRequest(new { success = false, error = "无法获取影视标题" });
 
     // 搜索网盘
     var searchResult = await hubService.SearchAsync(title);
     var savedCount = 0;
+
+    var dbPath = Path.Combine(builder.Environment.ContentRootPath, "data", "tmdb_cache.db");
+    await using var conn = new SqliteConnection($"Data Source={dbPath}");
+    await conn.OpenAsync();
 
     foreach (var source in searchResult.Results)
     {
@@ -360,10 +477,11 @@ app.MapPost("/api/favorites/{favoriteId:int}/search", async (int favoriteId, Cla
             var url = obj.ContainsKey("url") ? obj["url"]?.GetValue<string>() : "";
             if (string.IsNullOrEmpty(url)) continue;
 
-            cmd.CommandText = @"INSERT OR IGNORE INTO search_results (favorite_id, source, cloud_type, title, url, password)
-                                VALUES (@favId, @source, @cloudType, @title, @url, @password)";
-            cmd.Parameters.Clear();
-            cmd.Parameters.AddWithValue("@favId", favId);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"INSERT OR IGNORE INTO search_results (tmdb_id, media_type, source, cloud_type, title, url, password)
+                                VALUES (@tmdbId, @mediaType, @source, @cloudType, @title, @url, @password)";
+            cmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+            cmd.Parameters.AddWithValue("@mediaType", mediaType);
             cmd.Parameters.AddWithValue("@source", source.Name);
             cmd.Parameters.AddWithValue("@cloudType", obj.ContainsKey("cloud_type") ? obj["cloud_type"]?.GetValue<string>() : "");
             cmd.Parameters.AddWithValue("@title", obj.ContainsKey("title") ? obj["title"]?.GetValue<string>() : "");
@@ -374,9 +492,56 @@ app.MapPost("/api/favorites/{favoriteId:int}/search", async (int favoriteId, Cla
     }
 
     return Results.Ok(new { success = true, data = new { savedCount }, error = (string?)null });
-}).RequireAuthorization();
+});
 
 // ====== 健康检查 ======
+// 兼容旧版搜索接口
+app.MapGet("/api/search/movie", async (string keyword, string type, int page, IHttpClientFactory f, [AsParameters] QueryParams qp) =>
+{
+    if (string.IsNullOrWhiteSpace(keyword)) return Results.BadRequest(ApiResponse(new { }, "Missing keyword"));
+    
+    var client = f.CreateClient("tmdb");
+    var enc = Uri.EscapeDataString(keyword);
+    
+    // 同时搜索电影和电视剧
+    var movieTask = client.GetAsync($"search/movie?api_key={tmdbApiKey}&query={enc}&language={qp.Language}&page={page}");
+    var tvTask = client.GetAsync($"search/tv?api_key={tmdbApiKey}&query={enc}&language={qp.Language}&page={page}");
+    
+    await Task.WhenAll(movieTask, tvTask);
+    
+    var movieResponse = await movieTask;
+    var tvResponse = await tvTask;
+    
+    var results = new List<object>();
+    
+    // 解析电影结果
+    if (movieResponse.IsSuccessStatusCode)
+    {
+        var movieJson = JsonDocument.Parse(await movieResponse.Content.ReadAsStringAsync());
+        var movieResults = movieJson.RootElement.GetProperty("results").EnumerateArray()
+            .Select(e => TmdbToDto(e, "movie"));
+        results.AddRange(movieResults);
+    }
+    
+    // 解析电视剧结果
+    if (tvResponse.IsSuccessStatusCode)
+    {
+        var tvJson = JsonDocument.Parse(await tvResponse.Content.ReadAsStringAsync());
+        var tvResults = tvJson.RootElement.GetProperty("results").EnumerateArray()
+            .Select(e => TmdbToDto(e, "tv"));
+        results.AddRange(tvResults);
+    }
+    
+    // 按热度排序
+    var sortedResults = results.OrderByDescending(r => 
+    {
+        var prop = r.GetType().GetProperty("tmdbVoteAverage");
+        return prop?.GetValue(r) is double d ? d : 0;
+    }).ToList();
+    
+    return Results.Content(ApiResponse(sortedResults), "application/json");
+});
+
 app.MapGet("/health", () => Results.Ok(new {
     status = "ok",
     time = DateTime.UtcNow.ToString("o"),
@@ -737,7 +902,473 @@ app.MapDelete("/api/admin/sources/{name}", async (string name, HubService hub) =
     return Results.Ok(new { message = "Source removed", name });
 });
 
-app.Run();
+
+// ====== 网盘管理 API ======
+
+// 获取网盘列表
+app.MapGet("/api/cloud-drives", async (HttpRequest req, IDbCache cache) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "SELECT id, type, name, status, expires_at, created_at FROM cloud_drives WHERE user_id = @userId ORDER BY created_at DESC";
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    var drives = new List<object>();
+    using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+    {
+        drives.Add(new
+        {
+            id = reader.GetInt32(0),
+            type = reader.GetString(1),
+            name = reader.IsDBNull(2) ? null : reader.GetString(2),
+            status = reader.GetString(3),
+            expiresAt = reader.IsDBNull(4) ? null : reader.GetDateTime(4).ToString("o"),
+            createdAt = reader.GetDateTime(5).ToString("o")
+        });
+    }
+
+    return Results.Ok(new { success = true, data = drives });
+}).RequireAuthorization();
+
+// 添加网盘账号
+app.MapPost("/api/cloud-drives", async (HttpRequest req, IDbCache cache) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    var body = await JsonSerializer.DeserializeAsync<JsonElement>(req.Body);
+    var type = body.GetProperty("type").GetString();
+    var name = body.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+    var cookie = body.GetProperty("cookie").GetString();
+
+    if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(cookie))
+        return Results.BadRequest(new { success = false, error = "类型和Cookie不能为空" });
+
+    if (type != "123" && type != "115")
+        return Results.BadRequest(new { success = false, error = "不支持的网盘类型" });
+
+    // 加密 Cookie
+    var encryptedCookie = Zhuiying.Hub.Services.CookieEncryption.Encrypt(cookie);
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = @"INSERT INTO cloud_drives (user_id, type, name, encrypted_cookie, status) 
+                        VALUES (@userId, @type, @name, @cookie, 'active'); SELECT last_insert_rowid();";
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+    cmd.Parameters.AddWithValue("@type", type);
+    cmd.Parameters.AddWithValue("@name", name ?? "");
+    cmd.Parameters.AddWithValue("@cookie", encryptedCookie);
+
+    var driveId = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+    return Results.Ok(new { success = true, data = new { id = driveId, type, name, status = "active" } });
+}).RequireAuthorization();
+
+// 删除网盘账号
+app.MapDelete("/api/cloud-drives/{id}", async (int id, HttpRequest req, IDbCache cache) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "DELETE FROM cloud_drives WHERE id = @id AND user_id = @userId";
+    cmd.Parameters.AddWithValue("@id", id);
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    var affected = await cmd.ExecuteNonQueryAsync();
+    return Results.Ok(new { success = affected > 0 });
+}).RequireAuthorization();
+
+// 测试网盘连接
+app.MapPost("/api/cloud-drives/{id}/test", async (int id, HttpRequest req, IDbCache cache,
+    Zhuiying.Hub.Services.CloudDrive123Service drive123,
+    Zhuiying.Hub.Services.CloudDrive115Service drive115) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "SELECT type, encrypted_cookie FROM cloud_drives WHERE id = @id AND user_id = @userId";
+    cmd.Parameters.AddWithValue("@id", id);
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+        return Results.NotFound(new { success = false, error = "网盘不存在" });
+
+    var type = reader.GetString(0);
+    var encryptedCookie = reader.GetString(1);
+    var cookie = Zhuiying.Hub.Services.CookieEncryption.Decrypt(encryptedCookie);
+
+    Zhuiying.Hub.Services.CloudDriveBase service = type switch
+    {
+        "123" => drive123,
+        "115" => drive115,
+        _ => throw new Exception("不支持的网盘类型")
+    };
+
+    var success = await service.TestConnectionAsync(cookie);
+    var userInfo = success ? await service.GetUserInfoAsync(cookie) : null;
+
+    // 更新状态
+    using var updateCmd = conn.CreateCommand();
+    updateCmd.CommandText = "UPDATE cloud_drives SET status = @status, updated_at = datetime('now') WHERE id = @id";
+    updateCmd.Parameters.AddWithValue("@status", success ? "active" : "invalid");
+    updateCmd.Parameters.AddWithValue("@id", id);
+    await updateCmd.ExecuteNonQueryAsync();
+
+    return Results.Ok(new { success, userInfo });
+}).RequireAuthorization();
+
+// ====== 转存 API ======
+
+// 创建转存任务
+app.MapPost("/api/transfers", async (HttpRequest req, IDbCache cache,
+    Zhuiying.Hub.Services.CloudDrive123Service drive123,
+    Zhuiying.Hub.Services.CloudDrive115Service drive115) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    var body = await JsonSerializer.DeserializeAsync<JsonElement>(req.Body);
+    var driveId = body.GetProperty("driveId").GetInt32();
+    var tmdbId = body.GetProperty("tmdbId").GetInt32();
+    var mediaType = body.GetProperty("mediaType").GetString() ?? "movie";
+    var sourceUrl = body.GetProperty("sourceUrl").GetString();
+    var sourceTitle = body.TryGetProperty("sourceTitle", out var titleEl) ? titleEl.GetString() : null;
+    var season = body.TryGetProperty("season", out var seasonEl) ? seasonEl.GetInt32() : (int?)null;
+    var episode = body.TryGetProperty("episode", out var episodeEl) ? episodeEl.GetInt32() : (int?)null;
+    var targetPath = body.TryGetProperty("targetPath", out var pathEl) ? pathEl.GetString() : "";
+
+    if (string.IsNullOrEmpty(sourceUrl))
+        return Results.BadRequest(new { success = false, error = "分享链接不能为空" });
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+
+    // 获取网盘信息
+    using var driveCmd = conn.CreateCommand();
+    driveCmd.CommandText = "SELECT type, encrypted_cookie FROM cloud_drives WHERE id = @id AND user_id = @userId";
+    driveCmd.Parameters.AddWithValue("@id", driveId);
+    driveCmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    using var driveReader = await driveCmd.ExecuteReaderAsync();
+    if (!await driveReader.ReadAsync())
+        return Results.BadRequest(new { success = false, error = "网盘不存在" });
+
+    var driveType = driveReader.GetString(0);
+    var encryptedCookie = driveReader.GetString(1);
+    var cookie = Zhuiying.Hub.Services.CookieEncryption.Decrypt(encryptedCookie);
+
+    Zhuiying.Hub.Services.CloudDriveBase service = driveType switch
+    {
+        "123" => drive123,
+        "115" => drive115,
+        _ => throw new Exception("不支持的网盘类型")
+    };
+
+    // 解析分享链接
+    var (shareId, sharePwd) = service.ParseShareLink(sourceUrl);
+    if (string.IsNullOrEmpty(shareId))
+        return Results.BadRequest(new { success = false, error = "无效的分享链接" });
+
+    // 获取分享文件列表
+    List<Zhuiying.Hub.Models.ShareFileItem> files;
+    try
+    {
+        files = await service.GetShareFileListAsync(cookie, shareId, sharePwd);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { success = false, error = $"获取分享文件失败: {ex.Message}" });
+    }
+
+    // 创建转存记录
+    var transferIds = new List<int>();
+    using var insertCmd = conn.CreateCommand();
+    
+    foreach (var file in files.Where(f => !f.IsFolder))
+    {
+        insertCmd.CommandText = @"INSERT INTO transfers (user_id, drive_id, tmdb_id, media_type, season, episode, 
+                                  source_url, source_title, file_size, target_path, status) 
+                                  VALUES (@userId, @driveId, @tmdbId, @mediaType, @season, @episode, 
+                                  @sourceUrl, @sourceTitle, @fileSize, @targetPath, 'pending'); SELECT last_insert_rowid();";
+        insertCmd.Parameters.Clear();
+        insertCmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+        insertCmd.Parameters.AddWithValue("@driveId", driveId);
+        insertCmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+        insertCmd.Parameters.AddWithValue("@mediaType", mediaType);
+        insertCmd.Parameters.AddWithValue("@season", season.HasValue ? (object)season.Value : DBNull.Value);
+        insertCmd.Parameters.AddWithValue("@episode", episode.HasValue ? (object)episode.Value : DBNull.Value);
+        insertCmd.Parameters.AddWithValue("@sourceUrl", sourceUrl);
+        insertCmd.Parameters.AddWithValue("@sourceTitle", sourceTitle ?? "");
+        insertCmd.Parameters.AddWithValue("@fileSize", file.FileSize);
+        insertCmd.Parameters.AddWithValue("@targetPath", targetPath ?? "");
+
+        var transferId = Convert.ToInt32(await insertCmd.ExecuteScalarAsync());
+        transferIds.Add(transferId);
+    }
+
+    // 异步执行转存（后台任务）
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            foreach (var (file, transferId) in files.Where(f => !f.IsFolder).Zip(transferIds))
+            {
+                // 更新状态为转存中
+                using var updateCmd = conn.CreateCommand();
+                updateCmd.CommandText = "UPDATE transfers SET status = 'transferring' WHERE id = @id";
+                updateCmd.Parameters.AddWithValue("@id", transferId);
+                await updateCmd.ExecuteNonQueryAsync();
+
+                // 执行转存
+                var result = await service.TransferFileAsync(cookie, shareId, sharePwd, file.FileId, targetPath ?? "0");
+
+                // 更新结果
+                updateCmd.CommandText = @"UPDATE transfers SET status = @status, error_message = @error, 
+                                          completed_at = datetime('now') WHERE id = @id";
+                updateCmd.Parameters.Clear();
+                updateCmd.Parameters.AddWithValue("@status", result.Success ? "completed" : "failed");
+                updateCmd.Parameters.AddWithValue("@error", result.ErrorMessage ?? (object)DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@id", transferId);
+                await updateCmd.ExecuteNonQueryAsync();
+
+                // 如果成功，记录到 transferred_episodes
+                if (result.Success && season.HasValue && episode.HasValue)
+                {
+                    using var episodeCmd = conn.CreateCommand();
+                    episodeCmd.CommandText = @"INSERT OR IGNORE INTO transferred_episodes 
+                                              (tmdb_id, media_type, season, episode, drive_id, file_path, file_size) 
+                                              VALUES (@tmdbId, @mediaType, @season, @episode, @driveId, @filePath, @fileSize)";
+                    episodeCmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+                    episodeCmd.Parameters.AddWithValue("@mediaType", mediaType);
+                    episodeCmd.Parameters.AddWithValue("@season", season.Value);
+                    episodeCmd.Parameters.AddWithValue("@episode", episode.Value);
+                    episodeCmd.Parameters.AddWithValue("@driveId", driveId);
+                    episodeCmd.Parameters.AddWithValue("@filePath", file.FileName);
+                    episodeCmd.Parameters.AddWithValue("@fileSize", file.FileSize);
+                    await episodeCmd.ExecuteNonQueryAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"转存后台任务出错: {ex.Message}");
+        }
+    });
+
+    return Results.Ok(new { success = true, data = new { transferIds, totalFiles = transferIds.Count } });
+}).RequireAuthorization();
+
+// 获取转存记录
+app.MapGet("/api/transfers", async (HttpRequest req, IDbCache cache, string? status, int page, int pageSize) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    page = page < 1 ? 1 : page;
+    pageSize = pageSize < 1 || pageSize > 100 ? 20 : pageSize;
+    var offset = (page - 1) * pageSize;
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+
+    var whereClause = string.IsNullOrEmpty(status) ? "WHERE t.user_id = @userId" : "WHERE t.status = @status AND t.user_id = @userId";
+    cmd.CommandText = $@"SELECT t.id, t.drive_id, t.tmdb_id, t.media_type, t.season, t.episode, 
+                         t.source_url, t.source_title, t.file_size, t.target_path, t.status, 
+                         t.error_message, t.created_at, t.completed_at, cd.type as drive_type
+                         FROM transfers t 
+                         LEFT JOIN cloud_drives cd ON t.drive_id = cd.id
+                         {whereClause}
+                         ORDER BY t.created_at DESC
+                         LIMIT @limit OFFSET @offset";
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+    cmd.Parameters.AddWithValue("@limit", pageSize);
+    cmd.Parameters.AddWithValue("@offset", offset);
+    if (!string.IsNullOrEmpty(status))
+        cmd.Parameters.AddWithValue("@status", status);
+
+    var transfers = new List<object>();
+    using var reader = await cmd.ExecuteReaderAsync();
+    while (await reader.ReadAsync())
+    {
+        transfers.Add(new
+        {
+            id = reader.GetInt32(0),
+            driveId = reader.GetInt32(1),
+            tmdbId = reader.GetInt32(2),
+            mediaType = reader.GetString(3),
+            season = reader.IsDBNull(4) ? null : reader.GetInt32(4),
+            episode = reader.IsDBNull(5) ? null : reader.GetInt32(5),
+            sourceUrl = reader.GetString(6),
+            sourceTitle = reader.IsDBNull(7) ? null : reader.GetString(7),
+            fileSize = reader.IsDBNull(8) ? null : reader.GetInt64(8),
+            targetPath = reader.GetString(9),
+            status = reader.GetString(10),
+            errorMessage = reader.IsDBNull(11) ? null : reader.GetString(11),
+            createdAt = reader.GetDateTime(12).ToString("o"),
+            completedAt = reader.IsDBNull(13) ? null : reader.GetDateTime(13).ToString("o"),
+            driveType = reader.IsDBNull(14) ? null : reader.GetString(14)
+        });
+    }
+
+    return Results.Ok(new { success = true, data = transfers, page, pageSize });
+}).RequireAuthorization();
+
+// 重试失败的转存
+app.MapPost("/api/transfers/{id}/retry", async (int id, HttpRequest req, IDbCache cache,
+    Zhuiying.Hub.Services.CloudDrive123Service drive123,
+    Zhuiying.Hub.Services.CloudDrive115Service drive115) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+
+    // 获取转存记录
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = @"SELECT t.drive_id, t.source_url, t.target_path, cd.type, cd.encrypted_cookie 
+                        FROM transfers t 
+                        LEFT JOIN cloud_drives cd ON t.drive_id = cd.id
+                        WHERE t.id = @id AND t.user_id = @userId AND t.status = 'failed'";
+    cmd.Parameters.AddWithValue("@id", id);
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    using var reader = await cmd.ExecuteReaderAsync();
+    if (!await reader.ReadAsync())
+        return Results.BadRequest(new { success = false, error = "转存记录不存在或状态不是失败" });
+
+    var driveId = reader.GetInt32(0);
+    var sourceUrl = reader.GetString(1);
+    var targetPath = reader.GetString(2);
+    var driveType = reader.GetString(3);
+    var encryptedCookie = reader.GetString(4);
+    var cookie = Zhuiying.Hub.Services.CookieEncryption.Decrypt(encryptedCookie);
+
+    Zhuiying.Hub.Services.CloudDriveBase service = driveType switch
+    {
+        "123" => drive123,
+        "115" => drive115,
+        _ => throw new Exception("不支持的网盘类型")
+    };
+
+    var (shareId, sharePwd) = service.ParseShareLink(sourceUrl);
+    
+    // 更新状态为转存中
+    using var updateCmd = conn.CreateCommand();
+    updateCmd.CommandText = "UPDATE transfers SET status = 'transferring', error_message = NULL WHERE id = @id";
+    updateCmd.Parameters.AddWithValue("@id", id);
+    await updateCmd.ExecuteNonQueryAsync();
+
+    // 异步执行转存
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var files = await service.GetShareFileListAsync(cookie, shareId, sharePwd);
+            var file = files.FirstOrDefault(f => !f.IsFolder);
+            if (file == null)
+                throw new Exception("分享链接中没有文件");
+
+            var result = await service.TransferFileAsync(cookie, shareId, sharePwd, file.FileId, targetPath);
+
+            using var conn2 = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+            await conn2.OpenAsync();
+            using var cmd2 = conn2.CreateCommand();
+            cmd2.CommandText = @"UPDATE transfers SET status = @status, error_message = @error, 
+                                completed_at = datetime('now') WHERE id = @id";
+            cmd2.Parameters.AddWithValue("@status", result.Success ? "completed" : "failed");
+            cmd2.Parameters.AddWithValue("@error", result.ErrorMessage ?? (object)DBNull.Value);
+            cmd2.Parameters.AddWithValue("@id", id);
+            await cmd2.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"重试转存出错: {ex.Message}");
+        }
+    });
+
+    return Results.Ok(new { success = true });
+}).RequireAuthorization();
+
+// ====== 存储配置 API ======
+
+// 获取存储配置
+app.MapGet("/api/storage-config", async (HttpRequest req, IDbCache cache) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "SELECT config_json FROM storage_configs WHERE user_id = @userId";
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    var configJson = await cmd.ExecuteScalarAsync() as string;
+    if (string.IsNullOrEmpty(configJson))
+        return Results.Ok(new { success = true, data = new Zhuiying.Hub.Models.StoragePathConfig() });
+
+    var config = JsonSerializer.Deserialize<Zhuiying.Hub.Models.StoragePathConfig>(configJson);
+    return Results.Ok(new { success = true, data = config });
+}).RequireAuthorization();
+
+// 更新存储配置
+app.MapPut("/api/storage-config", async (HttpRequest req, IDbCache cache) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    var config = await JsonSerializer.DeserializeAsync<Zhuiying.Hub.Models.StoragePathConfig>(req.Body);
+    if (config == null)
+        return Results.BadRequest(new { success = false, error = "配置格式错误" });
+
+    var configJson = JsonSerializer.Serialize(config);
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = @"UPDATE storage_configs SET config_json = @config, updated_at = datetime('now') 
+                        WHERE user_id = @userId";
+    cmd.Parameters.AddWithValue("@config", configJson);
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    await cmd.ExecuteNonQueryAsync();
+    return Results.Ok(new { success = true });
+}).RequireAuthorization();
+
+// 导出存储配置
+app.MapGet("/api/storage-config/export", async (HttpRequest req, IDbCache cache) =>
+{
+    var userId = req.HttpContext.User.FindFirst("userId")?.Value;
+    if (string.IsNullOrEmpty(userId)) return Results.Unauthorized();
+
+    await using var conn = new SqliteConnection($"Data Source={Path.Combine(app.Environment.ContentRootPath, "data", "tmdb_cache.db")}");
+    await conn.OpenAsync();
+    using var cmd = conn.CreateCommand();
+    cmd.CommandText = "SELECT config_json FROM storage_configs WHERE user_id = @userId";
+    cmd.Parameters.AddWithValue("@userId", int.Parse(userId));
+
+    var configJson = await cmd.ExecuteScalarAsync() as string;
+    if (string.IsNullOrEmpty(configJson))
+        return Results.BadRequest(new { success = false, error = "配置不存在" });
+
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(configJson), "application/json", "storage-config.json");
+}).RequireAuthorization();
+
 
 // ====== Helper 方法 ======
 static object TmdbToDto(JsonElement e, string mediaType)
@@ -882,6 +1513,7 @@ public class SourceConfig
 
 public class HubService
 {
+    public IHttpClientFactory HttpFactory => _factory;
     private readonly IHttpClientFactory _factory;
     private readonly string _configPath = Path.Combine(AppContext.BaseDirectory, "config.json");
     public List<SourceConfig> Sources { get; private set; } = new();
@@ -910,7 +1542,7 @@ public class HubService
         }
         if (!Sources.Any())
         {
-            Sources.Add(new SourceConfig { Name = "PanSou", ApiUrl = "http://zhuiying-pansou:8888/api/search", Enabled = true, Type = "pansou" });
+            Sources.Add(new SourceConfig { Name = "PanSou", ApiUrl = "http://pansou:8888/api/search", Enabled = true, Type = "pansou" });
             SaveConfig();
         }
     }
@@ -1034,18 +1666,22 @@ public class FavoriteSearchWorker : BackgroundService
                 await using var conn = new SqliteConnection($"Data Source={dbPath}");
                 await conn.OpenAsync();
 
-                // 查找没有链接的收藏
+                // 查找超过24小时没有搜索结果的收藏
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = @"
-                    SELECT f.id, f.title FROM favorites f
-                    WHERE f.id NOT IN (SELECT DISTINCT favorite_id FROM search_results)
+                    SELECT DISTINCT f.tmdb_id, f.media_type, f.title FROM favorites f
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM search_results sr 
+                        WHERE sr.tmdb_id = f.tmdb_id AND sr.media_type = f.media_type
+                        AND sr.found_at > datetime('now', '-24 hours')
+                    )
                     ORDER BY f.added_at ASC";
 
-                var favoritesToSearch = new List<(int Id, string Title)>();
+                var favoritesToSearch = new List<(int TmdbId, string MediaType, string Title)>();
                 using var reader = await cmd.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
-                    favoritesToSearch.Add((reader.GetInt32(0), reader.GetString(1)));
+                    favoritesToSearch.Add((reader.GetInt32(0), reader.GetString(1), reader.GetString(2)));
                 }
                 reader.Close();
 
@@ -1057,11 +1693,11 @@ public class FavoriteSearchWorker : BackgroundService
                 {
                     _logger.LogInformation("开始搜索 {Count} 个收藏的链接", favoritesToSearch.Count);
 
-                    foreach (var (favId, title) in favoritesToSearch)
+                    foreach (var (tmdbId, mediaType, title) in favoritesToSearch)
                     {
                         if (string.IsNullOrEmpty(title)) continue;
 
-                        _logger.LogInformation("搜索收藏 #{FavId}: {Title}", favId, title);
+                        _logger.LogInformation("搜索收藏 #{TmdbId}: {Title}", tmdbId, title);
                         var searchResult = await hubService.SearchAsync(title);
 
                         using var insertCmd = conn.CreateCommand();
@@ -1075,10 +1711,11 @@ public class FavoriteSearchWorker : BackgroundService
                                 if (string.IsNullOrEmpty(url)) continue;
 
                                 insertCmd.CommandText = @"
-                                    INSERT OR IGNORE INTO search_results (favorite_id, source, cloud_type, title, url, password)
-                                    VALUES (@favId, @source, @cloudType, @title, @url, @password)";
+                                    INSERT OR IGNORE INTO search_results (tmdb_id, media_type, source, cloud_type, title, url, password)
+                                    VALUES (@tmdbId, @mediaType, @source, @cloudType, @title, @url, @password)";
                                 insertCmd.Parameters.Clear();
-                                insertCmd.Parameters.AddWithValue("@favId", favId);
+                                insertCmd.Parameters.AddWithValue("@tmdbId", tmdbId);
+                                insertCmd.Parameters.AddWithValue("@mediaType", mediaType);
                                 insertCmd.Parameters.AddWithValue("@source", source.Name);
                                 insertCmd.Parameters.AddWithValue("@cloudType", obj.ContainsKey("cloud_type") ? obj["cloud_type"]?.GetValue<string>() : "");
                                 insertCmd.Parameters.AddWithValue("@title", obj.ContainsKey("title") ? obj["title"]?.GetValue<string>() : "");
@@ -1100,3 +1737,5 @@ public class FavoriteSearchWorker : BackgroundService
         }
     }
 }
+
+app.Run();

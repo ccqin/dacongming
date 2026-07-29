@@ -1,0 +1,206 @@
+@page "/cloud-drives"
+@inject CloudDriveService CloudDriveService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+@inject IDialogService DialogService
+
+<PageTitle>网盘管理 - 追影</PageTitle>
+
+<div class="cloud-drives-page">
+    @if (!isAuthenticated)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🔐</div>
+            <h2>请先登录</h2>
+            <p>登录后即可管理你的网盘账号</p>
+            <a href="/login" class="primary-btn">去登录</a>
+        </div>
+    }
+    else if (isLoading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <h1>☁️ 网盘管理</h1>
+            <button class="primary-btn" @onclick="OpenAddDialog">
+                <span class="btn-icon">+</span> 添加网盘
+            </button>
+        </div>
+
+        @if (drives.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon">☁️</div>
+                <h2>还没有添加网盘</h2>
+                <p>添加网盘账号后，即可将影视资源转存到你的网盘</p>
+                <button class="primary-btn" @onclick="OpenAddDialog">添加网盘</button>
+            </div>
+        }
+        else
+        {
+            <div class="drives-list">
+                @foreach (var drive in drives)
+                {
+                    <div class="drive-card">
+                        <div class="drive-info">
+                            <div class="drive-type-badge @drive.Type.ToLower()">
+                                @drive.Type
+                            </div>
+                            <div class="drive-details">
+                                <h3>@(string.IsNullOrEmpty(drive.Name) ? $"{drive.Type}网盘" : drive.Name)</h3>
+                                <div class="drive-meta">
+                                    <span class="status-badge @drive.Status">
+                                        @(drive.Status == "active" ? "✓ 正常" : drive.Status == "expired" ? "⚠ 过期" : "✗ 失效")
+                                    </span>
+                                    <span class="created-at">添加于 @FormatDate(drive.CreatedAt)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="drive-actions">
+                            <button class="icon-btn" @onclick="() => TestConnection(drive.Id)" title="测试连接" disabled="@testingIds.Contains(drive.Id)">
+                                @(testingIds.Contains(drive.Id) ? "⏳" : "🔗")
+                            </button>
+                            <button class="icon-btn danger" @onclick="() => ConfirmDelete(drive.Id)" title="删除">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(testResult))
+        {
+            <div class="toast @testResultClass">
+                @testResult
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private List<CloudDriveItem> drives = new();
+    private bool isLoading = true;
+    private bool isAuthenticated;
+    private HashSet<int> testingIds = new();
+    private string? testResult;
+    private string testResultClass = "success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        isAuthenticated = await AuthService.IsLoggedInAsync();
+        if (isAuthenticated)
+        {
+            await LoadDrives();
+        }
+        else
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadDrives()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            drives = await CloudDriveService.GetDrivesAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载网盘列表失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenAddDialog()
+    {
+        var parameters = new DialogParameters<AddDriveDialog>();
+        DialogService.Show<AddDriveDialog>("添加网盘", parameters, new DialogOptions
+        {
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true,
+            CloseOnEscapeKey = true
+        });
+    }
+
+    private async Task TestConnection(int driveId)
+    {
+        testingIds.Add(driveId);
+        testResult = null;
+        StateHasChanged();
+
+        try
+        {
+            var (success, userInfo) = await CloudDriveService.TestDriveAsync(driveId);
+            if (success)
+            {
+                testResult = $"连接成功！用户: {userInfo}";
+                testResultClass = "success";
+            }
+            else
+            {
+                testResult = "连接失败，Cookie 可能已过期";
+                testResultClass = "error";
+            }
+        }
+        catch (Exception ex)
+        {
+            testResult = $"测试出错: {ex.Message}";
+            testResultClass = "error";
+        }
+        finally
+        {
+            testingIds.Remove(driveId);
+            await LoadDrives();
+            StateHasChanged();
+
+            // 3秒后隐藏提示
+            _ = Task.Delay(3000).ContinueWith(_ =>
+            {
+                testResult = null;
+                InvokeAsync(StateHasChanged);
+            });
+        }
+    }
+
+    private async Task ConfirmDelete(int driveId)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { "Title", "确认删除" },
+            { "Message", "确定要删除这个网盘账号吗？删除后需要重新添加。" },
+            { "ConfirmText", "删除" },
+            { "ConfirmColor", Color.Error }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true };
+        var dialog = DialogService.Show<ConfirmDialog>("", parameters, options);
+        var result = await dialog.Result;
+
+        if (result != null && !result.Canceled)
+        {
+            await CloudDriveService.DeleteDriveAsync(driveId);
+            await LoadDrives();
+        }
+    }
+
+    private string FormatDate(string dateStr)
+    {
+        if (DateTime.TryParse(dateStr, out var dt))
+        {
+            return dt.ToString("yyyy-MM-dd");
+        }
+        return dateStr;
+    }
+}

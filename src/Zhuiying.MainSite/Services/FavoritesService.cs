@@ -71,6 +71,26 @@ public class FavoritesService
         return response.IsSuccessStatusCode;
     }
 
+
+    public async Task<List<FavoriteLink>> GetLinksByTmdbIdAsync(int tmdbId, string mediaType)
+    {
+        await ApplyTokenAsync();
+        var response = await _http.GetAsync($"/api/search/links/{tmdbId}/{mediaType}");
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<ApiResponse<List<FavoriteLink>>>();
+            return result?.Data ?? new List<FavoriteLink>();
+        }
+        return new List<FavoriteLink>();
+    }
+
+    public async Task<bool> SearchLinksByTmdbIdAsync(int tmdbId, string mediaType)
+    {
+        await ApplyTokenAsync();
+        var response = await _http.PostAsync($"/api/search/links/{tmdbId}/{mediaType}", null);
+        return response.IsSuccessStatusCode;
+    }
+
     public async Task<bool> IsFavoriteAsync(int tmdbId, string mediaType)
     {
         var favorites = await GetFavoritesAsync();

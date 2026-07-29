@@ -1,0 +1,174 @@
+@using MudBlazor
+@using Zhuiying.MainSite.Services
+
+<MudDialog>
+    <TitleContent>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <MudIcon Icon="@Icons.Material.Filled.CloudUpload" />
+            <span>转存到网盘</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (isLoading)
+        {
+            <div style="display: flex; flex-direction: column; align-items: center; padding: 2rem;">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                <p style="margin-top: 1rem;">加载中...</p>
+            </div>
+        }
+        else if (drives.Count == 0)
+        {
+            <div style="text-align: center; padding: 2rem;">
+                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Large" />
+                <p style="margin-top: 1rem;">还没有添加网盘账号</p>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="GoToAddDrive">
+                    去添加网盘
+                </MudButton>
+            </div>
+        }
+        else
+        {
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <MudSelect T="int" @bind-Value="selectedDriveId" Label="选择网盘" Variant="Variant.Outlined">
+                    @foreach (var drive in drives)
+                    {
+                        <MudSelectItem Value="@drive.Id">
+                            @(string.IsNullOrEmpty(drive.Name) ? $"{drive.Type}网盘" : drive.Name)
+                            (@(drive.Status == "active" ? "正常" : "失效"))
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudTextField @bind-Value="sourceUrl" Label="分享链接" Variant="Variant.Outlined"
+                              Placeholder="粘贴网盘分享链接" />
+
+                <MudTextField @bind-Value="targetPath" Label="保存路径" Variant="Variant.Outlined"
+                              Placeholder="例如：/电影/肖申克的救赎 (1994)" />
+
+                <div style="font-size: 0.85rem; color: var(--mud-palette-text-secondary);">
+                    <p>💡 提示：可以在"存储配置"页面设置默认路径模板</p>
+                </div>
+
+                @if (!string.IsNullOrEmpty(error))
+                {
+                    <MudAlert Severity="Severity.Error">@error</MudAlert>
+                }
+
+                @if (!string.IsNullOrEmpty(success))
+                {
+                    <MudAlert Severity="Severity.Success">@success</MudAlert>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">取消</MudButton>
+        <MudButton OnClick="Submit" Color="Color.Primary" Variant="Variant.Filled" 
+                   Disabled="@(isSubmitting || drives.Count == 0)">
+            @(isSubmitting ? "转存中..." : "开始转存")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Parameter] public int TmdbId { get; set; }
+    [Parameter] public string MediaType { get; set; } = "movie";
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public int? Season { get; set; }
+    [Parameter] public int? Episode { get; set; }
+    [Inject] private CloudDriveService CloudDriveService { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private List<CloudDriveItem> drives = new();
+    private int selectedDriveId;
+    private string sourceUrl = "";
+    private string targetPath = "";
+    private bool isLoading = true;
+    private bool isSubmitting;
+    private string? error;
+    private string? success;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            drives = await CloudDriveService.GetDrivesAsync();
+            var activeDrive = drives.FirstOrDefault(d => d.Status == "active");
+            if (activeDrive != null)
+            {
+                selectedDriveId = activeDrive.Id;
+            }
+            else if (drives.Count > 0)
+            {
+                selectedDriveId = drives[0].Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"加载网盘列表失败: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void GoToAddDrive()
+    {
+        MudDialog?.Close();
+        Navigation.NavigateTo("/cloud-drives");
+    }
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(sourceUrl))
+        {
+            error = "分享链接不能为空";
+            return;
+        }
+
+        if (selectedDriveId == 0)
+        {
+            error = "请选择网盘";
+            return;
+        }
+
+        isSubmitting = true;
+        error = null;
+        success = null;
+        StateHasChanged();
+
+        try
+        {
+            var (successResult, errorMsg, transferIds) = await CloudDriveService.CreateTransferAsync(
+                selectedDriveId, TmdbId, MediaType, sourceUrl, Title, Season, Episode, targetPath);
+
+            if (successResult && transferIds != null)
+            {
+                success = $"已创建 {transferIds.Count} 个转存任务，请在转存记录中查看进度";
+                StateHasChanged();
+                
+                await Task.Delay(1500);
+                MudDialog?.Close(DialogResult.Ok(true));
+                Navigation.NavigateTo("/transfers");
+            }
+            else
+            {
+                error = errorMsg ?? "创建转存任务失败";
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"出错: {ex.Message}";
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged();
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+}

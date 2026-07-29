@@ -1,0 +1,134 @@
+@using MudBlazor
+@using Zhuiying.MainSite.Services
+
+<MudDialog>
+    <TitleContent>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <MudIcon Icon="@Icons.Material.Filled.Search" />
+            <span>搜索链接 - @Title</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (isLoading)
+        {
+            <div style="display: flex; flex-direction: column; align-items: center; padding: 2rem;">
+                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+                <p style="margin-top: 1rem; color: var(--zhui-muted);">正在搜索网盘资源...</p>
+            </div>
+        }
+        else if (linksByType.Count == 0)
+        {
+            <div style="text-align: center; padding: 2rem; color: var(--zhui-muted);">
+                <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" />
+                <p style="margin-top: 1rem;">没有找到相关资源</p>
+            </div>
+        }
+        else
+        {
+            <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+                @foreach (var group in linksByType)
+                {
+                    <MudTabPanel Text="@group.Key" BadgeData="@group.Value.Count" BadgeColor="Color.Info">
+                        <div style="max-height: 50vh; overflow-y: auto;">
+                            @foreach (var link in group.Value)
+                            {
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Style="min-width: 60px;">@link.CloudType</MudChip>
+                                        <a href="@link.Url" target="_blank" style="flex: 1; color: var(--zhui-text); text-decoration: none; font-weight: 500;">
+                                            @link.Title
+                                        </a>
+                                        @if (!string.IsNullOrEmpty(link.Password))
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Warning">密码: @link.Password</MudChip>
+                                        }
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <MudIcon Icon="@Icons.Material.Filled.Link" Size="Size.Small" Style="color: var(--zhui-muted);" />
+                                        <a href="@link.Url" target="_blank" style="color: var(--zhui-muted); text-decoration: none; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            @link.Url
+                                        </a>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </MudTabPanel>
+                }
+            </MudTabs>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">关闭</MudButton>
+        <MudButton OnClick="SearchAgain" Color="Color.Primary" Variant="Variant.Filled" Disabled="@isSearching">
+            @(isSearching ? "搜索中..." : "重新搜索")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public int TmdbId { get; set; }
+    [Parameter] public string MediaType { get; set; } = "movie";
+    [Inject] private FavoritesService FavoritesService { get; set; } = default!;
+
+    private Dictionary<string, List<FavoriteLink>> linksByType = new();
+    private bool isLoading = true;
+    private bool isSearching = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLinks();
+    }
+
+    private async Task LoadLinks()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var links = await FavoritesService.GetLinksByTmdbIdAsync(TmdbId, MediaType);
+            
+            if (links.Count == 0)
+            {
+                // 没有缓存，触发搜索
+                await FavoritesService.SearchLinksByTmdbIdAsync(TmdbId, MediaType);
+                links = await FavoritesService.GetLinksByTmdbIdAsync(TmdbId, MediaType);
+            }
+
+            // 按网盘类型分组
+            linksByType = links
+                .GroupBy(l => string.IsNullOrEmpty(l.CloudType) ? "其他" : l.CloudType)
+                .ToDictionary(g => g.Key, g => g.ToList());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"搜索失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            isSearching = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SearchAgain()
+    {
+        isSearching = true;
+        StateHasChanged();
+
+        try
+        {
+            await FavoritesService.SearchLinksByTmdbIdAsync(TmdbId, MediaType);
+            await LoadLinks();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"重新搜索失败: {ex.Message}");
+        }
+    }
+
+    private void Cancel() => MudDialog?.Cancel();
+}

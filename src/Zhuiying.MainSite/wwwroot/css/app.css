@@ -353,3 +353,313 @@ body {
     .detail-poster { flex: 0 0 auto; max-width: 200px; margin: 0 auto; }
     .detail-text h1 { font-size: 1.8rem; }
 }
+
+/* ====== 网盘管理页面 ====== */
+.cloud-drives-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.drives-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.drive-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--zhui-card-bg, rgba(255,255,255,0.05));
+    border-radius: 12px;
+    padding: 1.25rem;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.drive-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.drive-type-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: white;
+}
+.drive-type-badge.p123, .drive-type-badge.123 {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+}
+.drive-type-badge.p115, .drive-type-badge.115 {
+    background: linear-gradient(135deg, #115b9e, #1a73c9);
+}
+
+.drive-details h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.drive-meta {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+    font-size: 0.85rem;
+    color: var(--zhui-muted, #888);
+}
+
+.status-badge {
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+.status-badge.active { background: rgba(76,175,80,0.15); color: #4caf50; }
+.status-badge.expired { background: rgba(255,152,0,0.15); color: #ff9800; }
+.status-badge.invalid { background: rgba(244,67,54,0.15); color: #f44336; }
+
+.drive-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.icon-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(255,255,255,0.08);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    transition: all 0.2s;
+}
+.icon-btn:hover { background: rgba(255,255,255,0.15); }
+.icon-btn.danger:hover { background: rgba(244,67,54,0.2); }
+
+/* ====== 转存记录页面 ====== */
+.transfers-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.filter-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.filter-tab {
+    padding: 0.4rem 1rem;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: transparent;
+    color: var(--zhui-text, #fff);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+.filter-tab.active {
+    background: var(--zhui-primary, #667eea);
+    border-color: var(--zhui-primary, #667eea);
+}
+
+.transfers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
+.transfer-card {
+    background: var(--zhui-card-bg, rgba(255,255,255,0.05));
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.transfer-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.transfer-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.drive-badge {
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: white;
+}
+.drive-badge.p123, .drive-badge.123 { background: #667eea; }
+.drive-badge.p115, .drive-badge.115 { background: #1a73c9; }
+
+.transfer-details h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.transfer-meta {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--zhui-muted, #888);
+}
+
+.transfer-status {
+    text-align: right;
+}
+
+.error-msg {
+    font-size: 0.8rem;
+    color: #f44336;
+    margin-top: 0.25rem;
+}
+
+.transfer-actions {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+/* ====== 存储配置页面 ====== */
+.storage-config-page {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+}
+
+.config-section {
+    background: var(--zhui-card-bg, rgba(255,255,255,0.05));
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid rgba(255,255,255,0.08);
+}
+
+.config-section h2 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+}
+
+.section-desc {
+    color: var(--zhui-muted, #888);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.template-vars {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.var-badge {
+    padding: 0.3rem 0.6rem;
+    background: rgba(102,126,234,0.15);
+    border-radius: 6px;
+    font-size: 0.8rem;
+    color: #667eea;
+}
+
+.config-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.form-group label {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.form-group input {
+    padding: 0.6rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    color: var(--zhui-text, #fff);
+    font-size: 0.9rem;
+}
+.form-group input:focus {
+    outline: none;
+    border-color: var(--zhui-primary, #667eea);
+}
+
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.save-result.success { color: #4caf50; }
+.save-result.error { color: #f44336; }
+
+.examples {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.example {
+    font-size: 0.85rem;
+}
+.example code {
+    background: rgba(255,255,255,0.08);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+/* ====== Toast ====== */
+.toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    z-index: 1000;
+    animation: slideUp 0.3s ease;
+}
+.toast.success { background: rgba(76,175,80,0.9); color: white; }
+.toast.error { background: rgba(244,67,54,0.9); color: white; }
+
+@keyframes slideUp {
+    from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+    to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+/* ====== Transfer button in favorites ====== */
+.transfer-btn {
+    background: rgba(102,126,234,0.15) !important;
+    color: #667eea !important;
+}
+.transfer-btn:hover {
+    background: rgba(102,126,234,0.3) !important;
+}

@@ -7,11 +7,12 @@ services:
       args:
         TARGET: Hub
     container_name: zhuiying-hub
-    expose:
-      - "5002"
+    ports:
+      - "5002:5002"
     environment:
       - TMDB_API_KEY=${TMDB_API_KEY}
       - ASPNETCORE_URLS=http://0.0.0.0:5002
+      - COOKIE_ENCRYPTION_KEY=${COOKIE_ENCRYPTION_KEY}
     volumes:
       - tmdb_data:/app/data
     restart: unless-stopped

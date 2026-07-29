@@ -1,0 +1,25 @@
+@using MudBlazor
+
+<MudDialog>
+    <TitleContent>
+        <span>@Title</span>
+    </TitleContent>
+    <DialogContent>
+        <p>@Message</p>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel" Variant="Variant.Text">取消</MudButton>
+        <MudButton OnClick="Submit" Color="@ConfirmColor" Variant="Variant.Filled">@ConfirmText</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Parameter] public string Title { get; set; } = "确认";
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public string ConfirmText { get; set; } = "确认";
+    [Parameter] public Color ConfirmColor { get; set; } = Color.Primary;
+
+    private void Submit() => MudDialog?.Close(DialogResult.Ok(true));
+    private void Cancel() => MudDialog?.Cancel();
+}

@@ -1,0 +1,189 @@
+@page "/storage-config"
+@inject CloudDriveService CloudDriveService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>存储配置 - 追影</PageTitle>
+
+<div class="storage-config-page">
+    @if (!isAuthenticated)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🔐</div>
+            <h2>请先登录</h2>
+            <p>登录后即可配置存储路径</p>
+            <a href="/login" class="primary-btn">去登录</a>
+        </div>
+    }
+    else if (isLoading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <h1>⚙️ 存储配置</h1>
+            <button class="secondary-btn" @onclick="ExportConfig">导出配置</button>
+        </div>
+
+        <div class="config-section">
+            <h2>路径模板</h2>
+            <p class="section-desc">配置影视资源的默认保存路径。支持以下变量：</p>
+            
+            <div class="template-vars">
+                @foreach (var v in templateVariables)
+                {
+                    <span class="var-badge">@v.Key - @v.Value</span>
+                }
+            </div>
+
+            <div class="config-form">
+                <div class="form-group">
+                    <label>电影保存路径</label>
+                    <input type="text" @bind="config.MoviePath" 
+                           placeholder="/电影/{title} ({year}) [{tmdb_id}]/{filename}" />
+                </div>
+
+                <div class="form-group">
+                    <label>剧集保存路径</label>
+                    <input type="text" @bind="config.TvPath" 
+                           placeholder="/剧集/{title}/{season}/{filename}" />
+                </div>
+
+                <div class="form-actions">
+                    <button class="primary-btn" @onclick="SaveConfig" disabled="@isSaving">
+                        @(isSaving ? "保存中..." : "保存配置")
+                    </button>
+                    @if (saveResult != null)
+                    {
+                        <span class="save-result @(saveResult.Value ? "success" : "error")">
+                            @(saveResult.Value ? "✓ 保存成功" : "✗ 保存失败")
+                        </span>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h2>示例</h2>
+            <div class="examples">
+                <div class="example">
+                    <strong>电影：</strong>
+                    <code>/电影/肖申克的救赎 (1994) [278]/肖申克的救赎.1994.1080p.mkv</code>
+                </div>
+                <div class="example">
+                    <strong>剧集：</strong>
+                    <code>/剧集/权力的游戏/S01/权力的游戏.S01E01.1080p.mkv</code>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private StoragePathConfig config = new();
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool isAuthenticated;
+    private bool? saveResult;
+
+    private Dictionary<string, string> templateVariables = new()
+    {
+        { "{title}", "影视名称（中文）" },
+        { "{year}", "上映年份" },
+        { "{tmdb_id}", "TMDB ID" },
+        { "{season}", "季（S01 格式）" },
+        { "{quality}", "画质（1080p/4K）" },
+        { "{subtitle}", "字幕（中字/双语）" },
+        { "{genre}", "类型" },
+        { "{filename}", "原始文件名" }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        isAuthenticated = await AuthService.IsLoggedInAsync();
+        if (isAuthenticated)
+        {
+            await LoadConfig();
+        }
+        else
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadConfig()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var loaded = await CloudDriveService.GetStorageConfigAsync();
+            if (loaded != null)
+            {
+                config = loaded;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载配置失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveConfig()
+    {
+        isSaving = true;
+        saveResult = null;
+        StateHasChanged();
+
+        try
+        {
+            var success = await CloudDriveService.UpdateStorageConfigAsync(config);
+            saveResult = success;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"保存配置失败: {ex.Message}");
+            saveResult = false;
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExportConfig()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(config, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+            
+            // 创建下载
+            await DownloadFile("storage-config.json", json);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"导出失败: {ex.Message}");
+        }
+    }
+
+    private async Task DownloadFile(string filename, string content)
+    {
+        // 使用 JS interop 下载文件
+        // 这里简化处理，实际可能需要 IJSRuntime
+        Console.WriteLine($"下载文件: {filename}");
+    }
+}

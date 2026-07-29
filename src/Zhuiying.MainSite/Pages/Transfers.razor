@@ -1,0 +1,230 @@
+@page "/transfers"
+@inject CloudDriveService CloudDriveService
+@inject AuthService AuthService
+@inject NavigationManager Navigation
+
+<PageTitle>转存记录 - 追影</PageTitle>
+
+<div class="transfers-page">
+    @if (!isAuthenticated)
+    {
+        <div class="empty-state">
+            <div class="empty-icon">🔐</div>
+            <h2>请先登录</h2>
+            <p>登录后即可查看转存记录</p>
+            <a href="/login" class="primary-btn">去登录</a>
+        </div>
+    }
+    else if (isLoading)
+    {
+        <div class="loading-state">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
+    }
+    else
+    {
+        <div class="page-header">
+            <h1>📥 转存记录</h1>
+            <div class="filter-tabs">
+                <button class="filter-tab @(statusFilter == null ? "active" : "")" @onclick="() => FilterBy(null)">全部</button>
+                <button class="filter-tab @(statusFilter == "completed" ? "active" : "")" @onclick="() => FilterBy("completed")">已完成</button>
+                <button class="filter-tab @(statusFilter == "failed" ? "active" : "")" @onclick="() => FilterBy("failed")">失败</button>
+                <button class="filter-tab @(statusFilter == "transferring" ? "active" : "")" @onclick="() => FilterBy("transferring")">转存中</button>
+            </div>
+        </div>
+
+        @if (transfers.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-icon">📥</div>
+                <h2>暂无转存记录</h2>
+                <p>从收藏页面选择影视资源转存到网盘后，记录会显示在这里</p>
+            </div>
+        }
+        else
+        {
+            <div class="transfers-list">
+                @foreach (var transfer in transfers)
+                {
+                    <div class="transfer-card">
+                        <div class="transfer-main">
+                            <div class="transfer-info">
+                                <span class="drive-badge @(transfer.DriveType?.ToLower() ?? "")">
+                                    @(transfer.DriveType ?? "网盘")
+                                </span>
+                                <div class="transfer-details">
+                                    <h3>@(transfer.SourceTitle ?? "未知资源")</h3>
+                                    <div class="transfer-meta">
+                                        @if (transfer.MediaType == "tv" && transfer.Season.HasValue)
+                                        {
+                                            <span>S@(transfer.Season.Value.ToString("D2"))</span>
+                                            @if (transfer.Episode.HasValue)
+                                            {
+                                                <span>E@(transfer.Episode.Value.ToString("D2"))</span>
+                                            }
+                                        }
+                                        @if (transfer.FileSize.HasValue)
+                                        {
+                                            <span>@FormatSize(transfer.FileSize.Value)</span>
+                                        }
+                                        <span>@FormatDate(transfer.CreatedAt)</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="transfer-status">
+                                <span class="status-badge @transfer.Status">
+                                    @GetStatusText(transfer.Status)
+                                </span>
+                                @if (transfer.Status == "failed" && !string.IsNullOrEmpty(transfer.ErrorMessage))
+                                {
+                                    <div class="error-msg">@transfer.ErrorMessage</div>
+                                }
+                            </div>
+                        </div>
+                        @if (transfer.Status == "failed")
+                        {
+                            <div class="transfer-actions">
+                                <button class="primary-btn small" @onclick="() => RetryTransfer(transfer.Id)" 
+                                        disabled="@retryingIds.Contains(transfer.Id)">
+                                    @(retryingIds.Contains(transfer.Id) ? "重试中..." : "重试")
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (hasMore)
+            {
+                <div class="load-more">
+                    <button class="secondary-btn" @onclick="LoadMore" disabled="@isLoadingMore">
+                        @(isLoadingMore ? "加载中..." : "加载更多")
+                    </button>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    private List<TransferItem> transfers = new();
+    private bool isLoading = true;
+    private bool isLoadingMore;
+    private bool isAuthenticated;
+    private string? statusFilter;
+    private int currentPage = 1;
+    private bool hasMore;
+    private HashSet<int> retryingIds = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        isAuthenticated = await AuthService.IsLoggedInAsync();
+        if (isAuthenticated)
+        {
+            await LoadTransfers();
+        }
+        else
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadTransfers()
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            transfers = await CloudDriveService.GetTransfersAsync(statusFilter, 1, 20);
+            currentPage = 1;
+            hasMore = transfers.Count >= 20;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载转存记录失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadMore()
+    {
+        isLoadingMore = true;
+        StateHasChanged();
+
+        try
+        {
+            currentPage++;
+            var more = await CloudDriveService.GetTransfersAsync(statusFilter, currentPage, 20);
+            transfers.AddRange(more);
+            hasMore = more.Count >= 20;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"加载更多失败: {ex.Message}");
+        }
+        finally
+        {
+            isLoadingMore = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task FilterBy(string? status)
+    {
+        statusFilter = status;
+        await LoadTransfers();
+    }
+
+    private async Task RetryTransfer(int transferId)
+    {
+        retryingIds.Add(transferId);
+        StateHasChanged();
+
+        try
+        {
+            await CloudDriveService.RetryTransferAsync(transferId);
+            await LoadTransfers();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"重试失败: {ex.Message}");
+        }
+        finally
+        {
+            retryingIds.Remove(transferId);
+            StateHasChanged();
+        }
+    }
+
+    private string GetStatusText(string status) => status switch
+    {
+        "pending" => "⏳ 等待中",
+        "transferring" => "🔄 转存中",
+        "completed" => "✅ 已完成",
+        "failed" => "❌ 失败",
+        _ => status
+    };
+
+    private string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+
+    private string FormatDate(string dateStr)
+    {
+        if (DateTime.TryParse(dateStr, out var dt))
+        {
+            return dt.ToString("MM-dd HH:mm");
+        }
+        return dateStr;
+    }
+}
