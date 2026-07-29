@@ -1210,11 +1210,11 @@ app.MapGet("/api/transfers", async (HttpRequest req, IDbCache cache, string? sta
             driveId = reader.GetInt32(1),
             tmdbId = reader.GetInt32(2),
             mediaType = reader.GetString(3),
-            season = reader.IsDBNull(4) ? null : reader.GetInt32(4),
-            episode = reader.IsDBNull(5) ? null : reader.GetInt32(5),
+            season = reader.IsDBNull(4) ? (int?)null : reader.GetInt32(4),
+            episode = reader.IsDBNull(5) ? (int?)null : reader.GetInt32(5),
             sourceUrl = reader.GetString(6),
             sourceTitle = reader.IsDBNull(7) ? null : reader.GetString(7),
-            fileSize = reader.IsDBNull(8) ? null : reader.GetInt64(8),
+            fileSize = reader.IsDBNull(8) ? (long?)null : reader.GetInt64(8),
             targetPath = reader.GetString(9),
             status = reader.GetString(10),
             errorMessage = reader.IsDBNull(11) ? null : reader.GetString(11),
@@ -1447,6 +1447,7 @@ static string GenerateJwtToken(string username, int userId, string role)
 }
 
 // ====== 类型声明 (Top-level 规范: 必须放最后) ======
+app.Run();
 public record RegisterRequest(string Username, string Password, string? Email = null);
 public record LoginRequest(string Username, string Password);
 public record FavoriteRequest(int TmdbId, string? MediaType = null, string? Title = null, string? PosterPath = null);
@@ -1738,4 +1739,3 @@ public class FavoriteSearchWorker : BackgroundService
     }
 }
 
-app.Run();

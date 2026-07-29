@@ -104,7 +104,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        isAuthenticated = await AuthService.IsLoggedInAsync();
+        isAuthenticated = await AuthService.IsAuthenticatedAsync();
         if (isAuthenticated)
         {
             await LoadConfig();
